@@ -1,0 +1,58 @@
+# WordPress core (when this plugin is developed in a local WP installation)
+/wp-admin/
+/wp-includes/
+/wp-*.php
+!/wp-config-sample.php
+/xmlrpc.php
+/license.txt
+/readme.html
+
+# WordPress runtime content
+/wp-content/uploads/
+/wp-content/cache/
+/wp-content/upgrade/
+/wp-content/backup*/
+/wp-content/debug.log
+
+# Logs and temporary files
+*.log
+php_errorlog
+error_log
+*.tmp
+*.swp
+*.swo
+
+# PHP and JavaScript dependencies / tooling caches
+/vendor/
+/node_modules/
+/.composer/
+/.npm/
+/.yarn/
+/.pnpm-store/
+/.cache/
+/.parcel-cache/
+/.eslintcache
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+
+# Test and coverage artefacts
+/coverage/
+/test-results/
+/.phpunit.result.cache
+/phpunit.xml
+!/phpunit.xml.dist
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db

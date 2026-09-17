@@ -1,0 +1,59 @@
+{
+	"name": "chillerlan/php-settings-container",
+	"description": "A container class for immutable settings objects. Not a DI container.",
+	"homepage": "https://github.com/chillerlan/php-settings-container",
+	"license": "MIT",
+	"type": "library",
+	"minimum-stability": "stable",
+	"keywords": [
+		"helper", "container", "settings", "configuration"
+	],
+	"authors": [
+		{
+			"name": "Smiley",
+			"email": "smiley@chillerlan.net",
+			"homepage": "https://github.com/codemasher"
+		}
+	],
+	"support": {
+		"issues": "https://github.com/chillerlan/php-settings-container/issues",
+		"source": "https://github.com/chillerlan/php-settings-container"
+	},
+	"require": {
+		"php": "^8.1",
+		"ext-json": "*"
+	},
+	"require-dev": {
+		"phan/phan": "^5.5.0",
+		"phpmd/phpmd": "^2.15",
+		"phpstan/phpstan": "^2.1.18",
+		"phpstan/phpstan-deprecation-rules": "^2.0.3",
+		"phpunit/phpunit": "^10.5",
+		"slevomat/coding-standard": "^8.19",
+		"squizlabs/php_codesniffer": "^3.13"
+	},
+	"autoload": {
+		"psr-4": {
+			"chillerlan\\Settings\\": "src"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"chillerlan\\SettingsTest\\": "tests"
+		}
+	},
+	"scripts": {
+		"phan": "@php vendor/bin/phan",
+		"phpcs": "@php vendor/bin/phpcs",
+		"phpstan": "@php vendor/bin/phpstan",
+		"phpunit": "@php vendor/bin/phpunit"
+	},
+	"config": {
+		"lock": false,
+		"sort-packages": true,
+		"platform-check": true,
+		"allow-plugins": {
+			"dealerdirect/phpcodesniffer-composer-installer": true
+		}
+	}
+}
