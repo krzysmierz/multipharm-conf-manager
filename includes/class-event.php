@@ -88,12 +88,34 @@ class CM_Event {
                 $quiz_obj = new CM_Quiz($quiz->id);
                 $quiz_obj->delete();
             }
+
+            // Remove raffle registrations, draw history and their QR files
+            // together with the event (the tables intentionally have no FK so
+            // this also works on older WordPress/MySQL installations).
+            $raffles = class_exists('CM_Raffle') ? CM_Raffle::get_by_event($this->id) : array();
+            foreach ($raffles as $raffle) {
+                CM_Database::delete('raffle_draws', array('raffle_id' => $raffle->id));
+                CM_Database::delete('raffle_participants', array('raffle_id' => $raffle->id));
+                CM_Database::delete('raffles', array('id' => $raffle->id));
+            }
             
             // Delete QR codes
+            $qr_codes = CM_Database::get_results('qr_codes', array('event_id' => $this->id));
+            foreach ($qr_codes as $qr_code) {
+                if (class_exists('CM_QR_Generator')) {
+                    CM_QR_Generator::delete_qr_code($qr_code->id);
+                }
+            }
             CM_Database::delete('qr_codes', array('event_id' => $this->id));
             
             // Delete event
-            return CM_Database::delete('events', array('id' => $this->id));
+            $result = CM_Database::delete('events', array('id' => $this->id));
+
+            if ($result !== false) {
+                delete_option(self::get_custom_css_option_name($this->id));
+            }
+
+            return $result;
         }
         return false;
     }
@@ -266,6 +288,102 @@ class CM_Event {
     public function get_status() { return $this->status; }
     public function get_created_at() { return $this->created_at; }
     public function get_updated_at() { return $this->updated_at; }
+
+    /**
+     * Retrieve optional CSS for the schedule and raffle screens.
+     *
+     * Event IDs belong to the plugin's custom table, so this deliberately uses
+     * a namespaced option instead of WordPress post meta.
+     */
+    public function get_custom_css_settings() {
+        if (!$this->id) {
+            return array('schedule' => '', 'raffle' => '');
+        }
+
+        $settings = get_option(self::get_custom_css_option_name($this->id), array());
+        $settings = is_array($settings) ? $settings : array();
+
+        return array(
+            'schedule' => self::get_valid_custom_css($settings['schedule'] ?? ''),
+            'raffle'   => self::get_valid_custom_css($settings['raffle'] ?? ''),
+        );
+    }
+
+    /** Store CSS only after validation by the trusted CSS editor workflow. */
+    public function set_custom_css_settings($settings) {
+        if (!$this->id) {
+            return false;
+        }
+
+        $settings = self::validate_custom_css_settings($settings);
+        if (is_wp_error($settings)) {
+            return $settings;
+        }
+
+        $option_name = self::get_custom_css_option_name($this->id);
+        if ($settings['schedule'] === '' && $settings['raffle'] === '') {
+            return delete_option($option_name);
+        }
+
+        return update_option($option_name, $settings, false);
+    }
+
+    /**
+     * Validate raw CSS without pretending to parse or sandbox it. The edit_css
+     * capability is the trust boundary; this guard prevents breaking out of a
+     * raw-text style element if option data is ever tampered with.
+     */
+    public static function validate_custom_css_settings($settings) {
+        if (!is_array($settings)) {
+            return new WP_Error('cm_invalid_event_css', __('Nieprawidłowe ustawienia CSS.', 'conference-manager'));
+        }
+
+        $validated = array();
+        foreach (array('schedule', 'raffle') as $view) {
+            $css = $settings[$view] ?? '';
+            if (!is_scalar($css)) {
+                return new WP_Error('cm_invalid_event_css', __('CSS musi być tekstem.', 'conference-manager'));
+            }
+
+            $css = trim((string) $css);
+            if (strlen($css) > 50000) {
+                return new WP_Error('cm_invalid_event_css', __('CSS nie może przekraczać 50 000 znaków.', 'conference-manager'));
+            }
+
+            // CSS is emitted as raw text. Do not permit an HTML tag or a
+            // closing style tag to escape its dedicated style element.
+            if (stripos($css, '</style') !== false || preg_match('/<\\s*\\/?\\s*[a-zA-Z!]/', $css)) {
+                return new WP_Error('cm_invalid_event_css', __('CSS nie może zawierać znaczników HTML.', 'conference-manager'));
+            }
+
+            $validated[$view] = $css;
+        }
+
+        return $validated;
+    }
+
+    /** Render an already revalidated CSS block for a single public view. */
+    public function get_custom_css_style_tag($view) {
+        $settings = $this->get_custom_css_settings();
+        $css = $settings[$view] ?? '';
+        if ($css === '') {
+            return '';
+        }
+
+        // The CSS was validated at write time and again immediately before
+        // output. It must remain raw text; esc_html() corrupts valid CSS.
+        // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        return '<style id="cm-event-' . esc_attr($view) . '-css-' . absint($this->id) . '">' . $css . '</style>';
+    }
+
+    private static function get_valid_custom_css($css) {
+        $validated = self::validate_custom_css_settings(array('schedule' => $css, 'raffle' => ''));
+        return is_wp_error($validated) ? '' : $validated['schedule'];
+    }
+
+    private static function get_custom_css_option_name($event_id) {
+        return 'cm_event_custom_css_' . absint($event_id);
+    }
 
     public function set_title($title) { $this->title = sanitize_text_field($title); }
     public function set_description($description) { $this->description = wp_kses_post($description); }

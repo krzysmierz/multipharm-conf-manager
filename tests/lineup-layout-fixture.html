@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conference Manager lineup fixture</title>
+  <link rel="stylesheet" href="../public/css/public.css">
+  <style>
+    /* Represents the schedule CSS entered for this event. */
+    .cm-event-theme-77 { --cm-lineup-accent: #c20b7a; --cm-lineup-active: #f4eaff; }
+    .cm-event-theme-77 .cm-event-lineup-layout { max-width: 1180px; }
+    body { margin: 0; padding: 32px; background: #f8f6fa; font-family: Arial, sans-serif; }
+  </style>
+  <script>
+    window.cm_event_data = { ajax_url: 'https://example.test/admin-ajax.php', nonce: 'fixture', debug: false };
+    window.EventSource = class {
+      constructor() { this.listeners = {}; window.fixtureEventSource = this; }
+      addEventListener(name, handler) { this.listeners[name] = handler; }
+      emit(name, data) { this.listeners[name]({ data: JSON.stringify(data) }); }
+    };
+  </script>
+</head>
+<body>
+  <div id="cm-current-presentation-77" class="cm-live-container cm-event-theme cm-event-theme-77" data-event-id="77">
+    <section class="cm-raffle-qr" aria-label="Rejestracja do losowania">
+      <p class="cm-raffle-qr__eyebrow">Losowanie</p><h2 class="cm-raffle-qr__title">Pakiet konferencyjny</h2>
+      <p class="cm-raffle-qr__instruction">Zeskanuj kod i zarejestruj się.</p>
+      <img class="cm-raffle-qr__image" alt="Kod QR" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='120' height='120' fill='white'/%3E%3Cpath fill='black' d='M8 8h35v35H8zm10 10v15h15V18zM77 8h35v35H77zm10 10v15h15V18zM8 77h35v35H8zm10 10v15h15V87zM55 55h12v12H55zm18 0h12v12H73zm18 0h12v12H91zm-36 18h12v12H55zm18 18h12v12H73zm18 0h12v12H91z'/%3E%3C/svg%3E">
+      <a class="cm-raffle-qr__link" href="https://example.test/?cm_raffle=first">Otwórz formularz rejestracji</a>
+    </section>
+  </div>
+  <div id="cm-event-lineup-77" class="cm-live-container cm-event-theme cm-event-theme-77" data-event-id="77" data-current-day="1">
+    <section class="cm-event-lineup-layout">
+      <header class="cm-event-lineup-layout__hero">
+        <p class="cm-event-lineup-layout__eyebrow">VIII Konferencja Sieci Aptek</p>
+        <h1>Wiedza, która nas łączy.</h1>
+        <p class="cm-event-lineup-layout__subtitle">Ludzie. Doświadczenie. Lepsza farmacja jutra.</p>
+        <span class="cm-event-lineup-layout__motif" aria-hidden="true"></span>
+      </header>
+      <div class="cm-event-lineup-layout__grid">
+        <section class="cm-event-lineup-layout__agenda" aria-label="Program konferencji">
+          <h2>Program konferencji</h2>
+          <div class="cm-lineup-list">
+            <div class="cm-lineup-item current"><span class="cm-live-badge">Teraz</span><div class="cm-lineup-time"><div class="cm-lineup-time__range">08:00 – 08:15</div></div><div class="cm-lineup-content"><h4>Rejestracja uczestników</h4><p class="cm-description">Rejestracja do losowania</p></div></div>
+            <div class="cm-lineup-item"><div class="cm-lineup-time"><div class="cm-lineup-time__range">08:30</div></div><div class="cm-lineup-content"><h4>Wystąpienie otwierające z bardzo długim tytułem, który sprawdza zawijanie tekstu na mniejszym ekranie</h4><p class="cm-presenter">Alicja Kowalska</p></div></div>
+          </div>
+        </section>
+        <aside class="cm-event-lineup-layout__aside">
+          <section class="cm-lineup-raffle" data-raffle-id="1"><h2>Dołącz do losowania</h2><p class="cm-lineup-raffle__label">Pakiet konferencyjny</p><img class="cm-lineup-raffle__image" alt="Kod QR" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='120' height='120' fill='white'/%3E%3Cpath fill='black' d='M8 8h35v35H8zm10 10v15h15V18zM77 8h35v35H77zm10 10v15h15V18zM8 77h35v35H8zm10 10v15h15V87zM55 55h12v12H55zm18 0h12v12H73zm18 0h12v12H91zm-36 18h12v12H55zm18 18h12v12H73zm18 0h12v12H91z'/%3E%3C/svg%3E"><p class="cm-lineup-raffle__instruction">Zeskanuj kod i zarejestruj się.</p><a class="cm-lineup-raffle__link" href="https://example.test/?cm_raffle=first">Otwórz formularz rejestracji</a></section>
+          <section class="cm-lineup-upcoming" aria-live="polite"><p class="cm-lineup-upcoming__eyebrow">Już niedługo</p><p class="cm-lineup-upcoming__time">08:30</p><h3>Wystąpienie otwierające</h3><p class="cm-lineup-upcoming__presenter">Alicja Kowalska</p></section>
+        </aside>
+      </div>
+    </section>
+  </div>
+  <script src="../public/js/event-live-updates.js"></script>
+</body>
+</html>

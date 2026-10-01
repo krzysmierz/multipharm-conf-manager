@@ -75,6 +75,7 @@ class CM_Shortcodes {
         }
 
         $event_id = intval($atts['event_id']);
+        $event = new CM_Event($event_id);
 
         // Enqueue SSE script
         wp_enqueue_script(
@@ -84,6 +85,9 @@ class CM_Shortcodes {
             time(),
             true
         );
+        // A raffle block can become active after this shortcode is first
+        // rendered, so load its delegated component script up front.
+        CM_Public::enqueue_raffle_presentation_assets();
 
         // Pass AJAX URL and nonce to JavaScript (only if not already localized)
         global $wp_scripts;
@@ -105,7 +109,9 @@ class CM_Shortcodes {
         $content = $this->render_presentation_html($current_presentation);
 
         $result = sprintf(
-            '<div id="cm-current-presentation-%d" class="cm-live-container" data-event-id="%d">%s</div>',
+            '%s<div id="cm-current-presentation-%d" class="cm-live-container cm-event-theme cm-event-theme-%d" data-event-id="%d">%s</div>',
+            $event->get_custom_css_style_tag('schedule'),
+            $event_id,
             $event_id,
             $event_id,
             $content
@@ -189,6 +195,11 @@ class CM_Shortcodes {
             time(),
             true
         );
+        // A draw can become the active lineup item after this shortcode has
+        // rendered. Its card is inserted into the sidebar by the SSE handler,
+        // so load the polling/animation controller even when this page has no
+        // separate current-presentation shortcode.
+        CM_Public::enqueue_raffle_presentation_assets();
 
         // Pass AJAX URL and nonce to JavaScript including public AJAX nonce
         global $wp_scripts;
@@ -212,8 +223,10 @@ class CM_Shortcodes {
         // Filter lineup by time
         $filtered_lineup = $this->filter_lineup_by_time($lineup_items);
 
-        // Get initial lineup HTML
-        $content = $this->render_lineup_html($filtered_lineup);
+        // Keep the schedule list as the live-update target, but place it in
+        // the complete public agenda layout. The same data also supplies the
+        // optional "coming up" panel, so this view never needs a second API.
+        $content = $this->render_event_lineup_layout($event, $filtered_lineup);
 
         // Add multi-day navigation if event has multiple days
         $total_days = $event->get_total_days();
@@ -230,7 +243,9 @@ class CM_Shortcodes {
         }
 
         $final_html = sprintf(
-            '<div id="cm-event-lineup-%d" class="cm-live-container" data-event-id="%d" data-current-day="%d">%s%s</div>',
+            '%s<div id="cm-event-lineup-%d" class="cm-live-container cm-event-theme cm-event-theme-%d" data-event-id="%d" data-current-day="%d">%s%s</div>',
+            $event->get_custom_css_style_tag('schedule'),
+            $event_id,
             $event_id,
             $event_id,
             $current_day,
@@ -297,9 +312,28 @@ class CM_Shortcodes {
     /**
      * Render presentation HTML for SSE updates
      */
-    private function render_presentation_html($presentation) {
+    public static function render_presentation_html($presentation) {
         if (!$presentation) {
             return '<div class="bg-gray-100 rounded-lg p-8 text-center text-gray-500">Brak aktywnej prezentacji</div>';
+        }
+
+        if (!empty($presentation->raffle_block_type)) {
+            $raffle = CM_Raffle::get($presentation->raffle_id ?? 0);
+            if (!$raffle || (int) $raffle->event_id !== (int) $presentation->event_id) {
+                return '<div class="bg-gray-100 rounded-lg p-8 text-center text-gray-500">' . esc_html__('Wybrane losowanie nie jest już dostępne.', 'conference-manager') . '</div>';
+            }
+            if ($presentation->raffle_block_type === 'raffle_draw') {
+                $event = new CM_Event($presentation->event_id);
+                return CM_Public::render_raffle_presentation_card($raffle, $event);
+            }
+            if ($presentation->raffle_block_type === 'raffle_qr') {
+                $url = CM_Raffle::get_registration_url($raffle);
+                $qr = CM_Raffle::get_qr($raffle->id);
+                $qr_url = $qr ? CM_QR_Generator::get_qr_url($qr->file_path) : '';
+                $output = '<section class="cm-raffle-qr" aria-label="' . esc_attr__('Rejestracja do losowania', 'conference-manager') . '"><p class="cm-raffle-qr__eyebrow">' . esc_html__('Losowanie', 'conference-manager') . '</p><h2 class="cm-raffle-qr__title">' . esc_html($raffle->label) . '</h2><p class="cm-raffle-qr__instruction">' . esc_html__('Zeskanuj kod i zarejestruj się.', 'conference-manager') . '</p>';
+                if ($qr_url) { $output .= '<img class="cm-raffle-qr__image" src="' . esc_url($qr_url) . '" alt="' . esc_attr__('Kod QR rejestracji do losowania', 'conference-manager') . '">'; }
+                return $output . '<a class="cm-raffle-qr__link" href="' . esc_url($url) . '">' . esc_html__('Otwórz formularz rejestracji', 'conference-manager') . '</a></section>';
+            }
         }
 
         if (WP_DEBUG) {
@@ -438,7 +472,7 @@ class CM_Shortcodes {
      */
     private function render_lineup_html($lineup) {
         if (empty($lineup)) {
-            return '<div class="text-center py-12"><svg class="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg><p class="text-gray-500 text-lg">Brak zaplanowanych prezentacji</p></div>';
+            return '<div class="cm-lineup-list cm-lineup-list--empty"><p>Brak zaplanowanych prezentacji</p></div>';
         }
 
         if (WP_DEBUG) {
@@ -446,7 +480,7 @@ class CM_Shortcodes {
         }
 
         $current_time = current_time('H:i:s');
-        $output = '<div class="cm-lineup-list space-y-3 max-w-4xl mx-auto ">';
+        $output = '<div class="cm-lineup-list">';
 
         foreach ($lineup as $item) {
             error_log("[DEBUG] render_lineup_html: Rendering item: {$item->title} (ID: {$item->id}, start_time: {$item->start_time})");
@@ -462,45 +496,35 @@ class CM_Shortcodes {
             $is_past = isset($item->end_time) && $item->end_time < $current_time && !$item->is_active;
             $is_current = $item->is_active;
 
-            $classes = array('cm-lineup-item', 'p-4', 'rounded-lg', 'border', 'flex', 'items-start', 'relative', 'transition-all');
+            $classes = array('cm-lineup-item');
             if ($is_past) {
                 $classes[] = 'past';
-                $classes[] = 'opacity-50';
-                $classes[] = 'bg-gray-50';
-                $classes[] = 'border-gray-200';
             }
             if ($is_current) {
                 $classes[] = 'current';
-                $classes[] = 'bg-blue-50';
-                $classes[] = 'border-blue-300';
-                $classes[] = 'shadow-md';
-            } else if (!$is_past) {
-                $classes[] = 'bg-white';
-                $classes[] = 'border-gray-200';
-                $classes[] = 'hover:border-blue-300';
-                $classes[] = 'hover:shadow-sm';
             }
 
             $output .= '<div class="' . implode(' ', $classes) . '">';
             if ($is_current) {
-                $output .= '<span class="cm-live-badge bg-blue-200 text-white text-xs font-bold uppercase px-2 py-1 rounded absolute top-2 right-2 animate-pulse">LIVE</span>';
+                $output .= '<span class="cm-live-badge">Teraz</span>';
             }
-            $output .= '<div class="cm-lineup-time text-gray-700 font-bold p-3 rounded-md text-center min-w-[70px]">';
-            $output .= '<div class="text-lg leading-tight">' . esc_html(date("H:i", strtotime($item->start_time))) . '</div>';
+            $start_time = date("H:i", strtotime($item->start_time));
+            $output .= '<div class="cm-lineup-time"><div class="cm-lineup-time__range">' . esc_html($start_time);
             if (isset($item->duration_minutes) && $item->duration_minutes) {
-                $output .= '<div class="text-xs text-gray-500 mt-1">' . esc_html($item->duration_minutes) . ' min</div>';
+                $end_time = date("H:i", strtotime($item->start_time) + ((int) $item->duration_minutes * 60));
+                $output .= ' – ' . esc_html($end_time);
             }
-            $output .= '</div>';
-            $output .= '<div class="cm-lineup-content flex-grow">';
-            $output .= '<h4 class="font-bold text-lg text-gray-900 mb-1">' . esc_html($item->title) . '</h4>';
+            $output .= '</div></div>';
+            $output .= '<div class="cm-lineup-content">';
+            $output .= '<h4>' . esc_html($item->title) . '</h4>';
             if ($item->presenter) {
-                $output .= '<p class="cm-presenter text-gray-600 text-sm mb-2"><svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>' . esc_html($item->presenter) . '</p>';
+                $output .= '<p class="cm-presenter">' . esc_html($item->presenter) . '</p>';
             }
             if ($item->description) {
-                $output .= '<p class="cm-description text-gray-500 text-sm leading-relaxed">' . esc_html($item->description) . '</p>';
+                $output .= '<p class="cm-description">' . esc_html($item->description) . '</p>';
             }
             if (isset($item->event_type) && $item->event_type === 'quick') {
-                $output .= '<span class="inline-block mt-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">Szybkie wydarzenie</span>';
+                $output .= '<span class="cm-lineup-quick-event">Szybkie wydarzenie</span>';
             }
             $output .= '</div>';
             $output .= '</div>';
@@ -509,6 +533,138 @@ class CM_Shortcodes {
         $output .= '</div>';
 
         return $output;
+    }
+
+    /** Render the public schedule page around its live-updated agenda list. */
+    private function render_event_lineup_layout($event, $lineup) {
+        $event_id = (int) $event->get_id();
+        $agenda = $this->render_lineup_html($lineup);
+        $agenda .= $this->render_raffle_schedule_html($event_id);
+        $upcoming = $this->get_upcoming_lineup_item($lineup);
+        $raffle = $this->get_lineup_raffle($event_id);
+        $aside = $this->render_lineup_aside_html($raffle, $upcoming);
+
+        $output = '<section class="cm-event-lineup-layout">';
+        $output .= '<header class="cm-event-lineup-layout__hero">';
+        $output .= '<p class="cm-event-lineup-layout__eyebrow">' . esc_html($event->get_title()) . '</p>';
+        $output .= '<h1>Wiedza, która nas łączy.</h1>';
+        $output .= '<p class="cm-event-lineup-layout__subtitle">Ludzie. Doświadczenie. Lepsza farmacja jutra.</p>';
+        $output .= '<span class="cm-event-lineup-layout__motif" aria-hidden="true"></span>';
+        $output .= '</header>';
+        $output .= '<div class="cm-event-lineup-layout__grid' . ($raffle || $upcoming ? '' : ' cm-event-lineup-layout__grid--single') . '">';
+        $output .= '<section class="cm-event-lineup-layout__agenda" aria-label="' . esc_attr__('Program konferencji', 'conference-manager') . '">';
+        $output .= '<h2>Program konferencji</h2>' . $agenda . '</section>';
+        $output .= $aside;
+        $output .= '</div></section>';
+
+        return $output;
+    }
+
+    /** Choose the raffle used in the public sidebar without inventing one. */
+    private function get_lineup_raffle($event_id) {
+        if (!class_exists('CM_Raffle')) {
+            return null;
+        }
+
+        $active = CM_Lineup::get_active_presentation($event_id);
+        if ($active && ($active->raffle_block_type ?? '') === 'raffle_qr' && !empty($active->raffle_id)) {
+            $raffle = CM_Raffle::get($active->raffle_id);
+            if ($raffle && (int) $raffle->event_id === (int) $event_id) {
+                return $raffle;
+            }
+        }
+
+        $raffles = CM_Raffle::get_by_event($event_id);
+        return !empty($raffles) ? $raffles[0] : null;
+    }
+
+    /** Return the first actual agenda item after the active item. */
+    private function get_upcoming_lineup_item($lineup) {
+        if (empty($lineup)) {
+            return null;
+        }
+
+        $items = array_values($lineup);
+        usort($items, function($a, $b) {
+            return strcmp($a->start_time ?? '', $b->start_time ?? '');
+        });
+        $active = null;
+        foreach ($items as $item) {
+            if (!empty($item->is_active)) {
+                $active = $item;
+                break;
+            }
+        }
+
+        foreach ($items as $item) {
+            if (empty($item->is_active) && (!$active || ($item->start_time ?? '') >= ($active->start_time ?? ''))) {
+                return $item;
+            }
+        }
+
+        return null;
+    }
+
+    /** Render the optional QR and upcoming panels from existing event data. */
+    private function render_lineup_aside_html($raffle, $upcoming) {
+        $output = '<aside class="cm-event-lineup-layout__aside"' . (!$raffle && !$upcoming ? ' hidden' : '') . '>';
+        if ($raffle) {
+            $url = CM_Raffle::get_registration_url($raffle);
+            $qr = CM_Raffle::get_qr($raffle->id);
+            $qr_url = $qr ? CM_QR_Generator::get_qr_url($qr->file_path) : '';
+            $output .= '<section class="cm-lineup-raffle" data-raffle-id="' . (int) $raffle->id . '" aria-label="' . esc_attr__('Rejestracja do losowania', 'conference-manager') . '">';
+            $output .= '<h2>Dołącz do losowania</h2><p class="cm-lineup-raffle__label">' . esc_html($raffle->label) . '</p>';
+            if ($qr_url) {
+                $output .= '<img class="cm-lineup-raffle__image" src="' . esc_url($qr_url) . '" alt="' . esc_attr__('Kod QR rejestracji do losowania', 'conference-manager') . '">';
+            }
+            $output .= '<p class="cm-lineup-raffle__instruction">Zeskanuj kod i zarejestruj się.</p>';
+            $output .= '<a class="cm-lineup-raffle__link" href="' . esc_url($url) . '">' . esc_html__('Otwórz formularz rejestracji', 'conference-manager') . '</a></section>';
+        } else {
+            $output .= '<section class="cm-lineup-raffle" hidden></section>';
+        }
+
+        $output .= '<section class="cm-lineup-upcoming" aria-live="polite"' . ($upcoming ? '' : ' hidden') . '>';
+        $output .= $this->render_lineup_upcoming_html($upcoming);
+        $output .= '</section></aside>';
+        return $output;
+    }
+
+    /** Render a compact description of the next real lineup item. */
+    private function render_lineup_upcoming_html($item) {
+        if (!$item) {
+            return '';
+        }
+
+        $output = '<p class="cm-lineup-upcoming__eyebrow">Już niedługo</p>';
+        $output .= '<p class="cm-lineup-upcoming__time">' . esc_html(date('H:i', strtotime($item->start_time))) . '</p>';
+        $output .= '<h3>' . esc_html($item->title) . '</h3>';
+        if (!empty($item->presenter)) {
+            $output .= '<p class="cm-lineup-upcoming__presenter">' . esc_html($item->presenter) . '</p>';
+        }
+        if (!empty($item->description)) {
+            $output .= '<p class="cm-lineup-upcoming__description">' . esc_html($item->description) . '</p>';
+        }
+        return $output;
+    }
+
+    /** Add each event raffle as a launchable item below the public schedule. */
+    private function render_raffle_schedule_html($event_id) {
+        $raffles = CM_Raffle::get_by_event($event_id);
+        if (empty($raffles)) {
+            return '';
+        }
+
+        $output = '<div class="cm-raffle-schedule mt-6 space-y-3 max-w-4xl mx-auto" aria-label="' . esc_attr__('Losowania', 'conference-manager') . '">';
+        foreach ($raffles as $raffle) {
+            $participant_count = count(CM_Raffle::get_participants($raffle->id));
+            $output .= '<a class="cm-raffle-schedule__item block rounded-lg border border-amber-200 bg-amber-50 p-4 transition-all hover:border-amber-400 hover:shadow-sm" href="' . esc_url(CM_Raffle::get_presentation_url($raffle)) . '">';
+            $output .= '<span class="block text-xs font-bold uppercase tracking-wide text-amber-700">' . esc_html__('Losowanie', 'conference-manager') . '</span>';
+            $output .= '<span class="mt-1 block text-lg font-bold text-gray-900">' . esc_html($raffle->label) . '</span>';
+            $output .= '<span class="mt-1 block text-sm text-gray-600">' . esc_html(sprintf(_n('%d zarejestrowany uczestnik', '%d zarejestrowanych uczestników', $participant_count, 'conference-manager'), $participant_count)) . '</span>';
+            $output .= '<span class="mt-2 inline-block text-sm font-semibold text-amber-800">' . esc_html__('Otwórz ekran losowania →', 'conference-manager') . '</span>';
+            $output .= '</a>';
+        }
+        return $output . '</div>';
     }
 
     /**

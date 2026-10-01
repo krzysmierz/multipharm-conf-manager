@@ -406,10 +406,14 @@ $lineup_items = CM_Lineup::get_by_event_chronological($event->get_id());
                         </div>
                     </button>
                     <?php endforeach; ?>
+                    <?php $raffle_options = CM_Raffle::get_by_event($event->get_id()); ?>
+                    <button type="button" class="quick-event-template p-3 border-2 border-gray-200 rounded-lg" data-title="Trwające losowanie" data-duration="15" data-raffle-block="raffle_draw">🎲<div class="text-sm font-medium">Trwające losowanie</div></button>
+                    <button type="button" class="quick-event-template p-3 border-2 border-gray-200 rounded-lg" data-title="Kod QR rejestracji do losowania" data-duration="15" data-raffle-block="raffle_qr">📱<div class="text-sm font-medium">Kod QR rejestracji do losowania</div></button>
                 </div>
 
                 <form id="quick-event-form" novalidate>
                     <div class="space-y-4">
+                        <input type="hidden" id="quick_raffle_block" value=""><div id="quick-raffle-select-wrap" class="hidden"><label for="quick_raffle_id" class="block text-sm font-medium text-gray-700 mb-2">Losowanie</label><select id="quick_raffle_id" class="w-full px-3 py-2 border border-gray-300 rounded-lg"><option value="">Wybierz losowanie</option><?php foreach ($raffle_options as $raffle_option): ?><option value="<?php echo esc_attr($raffle_option->id); ?>"><?php echo esc_html($raffle_option->label); ?></option><?php endforeach; ?></select><?php if (empty($raffle_options)): ?><p class="text-sm text-red-600">Najpierw utwórz losowanie w zakładce Losowanie.</p><?php endif; ?></div>
                         <div>
                             <label for="quick_title" class="block text-sm font-medium text-gray-700 mb-2">
                                 <?php _e('Nazwa wydarzenia', 'conference-manager'); ?> *
@@ -864,6 +868,9 @@ document.addEventListener('DOMContentLoaded', function() {
         quickModal.classList.remove('hidden');
         quickTitleInput.focus();
         document.body.style.overflow = 'hidden';
+        document.getElementById('quick_raffle_block').value = '';
+        document.getElementById('quick_raffle_id').value = '';
+        document.getElementById('quick-raffle-select-wrap').classList.add('hidden');
 
         // Set current day in quick modal
         const currentDay = parseInt(document.querySelector('.day-content')?.getAttribute('data-day')) || 1;
@@ -877,6 +884,9 @@ document.addEventListener('DOMContentLoaded', function() {
         quickModal.style.display = 'none';
         quickModal.classList.add('hidden');
         quickForm.reset();
+        document.getElementById('quick_raffle_block').value = '';
+        document.getElementById('quick_raffle_id').value = '';
+        document.getElementById('quick-raffle-select-wrap').classList.add('hidden');
         clearQuickErrors();
         document.body.style.overflow = '';
         if (previousActiveElement) {
@@ -921,6 +931,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
             quickTitleInput.value = title;
             selectQuickDuration(duration);
+            document.getElementById('quick_raffle_block').value = this.dataset.raffleBlock || '';
+            document.getElementById('quick-raffle-select-wrap').classList.toggle('hidden', !this.dataset.raffleBlock);
+            if (!this.dataset.raffleBlock) {
+                document.getElementById('quick_raffle_id').value = '';
+            }
 
             quickModal.querySelectorAll('.quick-event-template').forEach(b =>
                 b.classList.remove('border-green-500', 'bg-green-50'));
@@ -1000,6 +1015,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const startTime = quickTimeInput.value;
         const duration = parseInt(document.getElementById('quick_duration').value);
         const dayNumber = parseInt(quickDaySelect?.value) || 1;
+        const raffleBlock = document.getElementById('quick_raffle_block').value;
+        const raffleId = document.getElementById('quick_raffle_id').value;
 
         if (!startTime || !duration) return;
 
@@ -1047,6 +1064,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const startTime = quickTimeInput.value;
         const duration = document.getElementById('quick_duration').value;
         const dayNumber = parseInt(quickDaySelect?.value) || 1;
+        const raffleBlock = document.getElementById('quick_raffle_block').value;
+        const raffleId = document.getElementById('quick_raffle_id').value;
 
         let hasErrors = false;
 
@@ -1059,6 +1078,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showQuickFieldError('quick_start_time', 'Godzina rozpoczęcia jest wymagana');
             hasErrors = true;
         }
+        if (raffleBlock && !raffleId) { showQuickNotice('error', 'Wybierz losowanie lub utwórz je w zakładce Losowanie'); hasErrors = true; }
 
         if (hasErrors) return;
 
@@ -1074,6 +1094,8 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('start_time', startTime);
         formData.append('duration_minutes', duration);
         formData.append('day_number', dayNumber);
+        formData.append('raffle_block', raffleBlock);
+        formData.append('raffle_id', raffleId);
         formData.append('nonce', cm_ajax.ajax_nonce);
 
         fetch(cm_ajax.ajax_url, {

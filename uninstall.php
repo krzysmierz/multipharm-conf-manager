@@ -21,6 +21,11 @@ $tables = array(
     $wpdb->prefix . 'cm_quiz_questions',
     $wpdb->prefix . 'cm_quiz_answers',
     $wpdb->prefix . 'cm_user_responses',
+    $wpdb->prefix . 'cm_raffle_draws',
+    $wpdb->prefix . 'cm_raffle_participants',
+    $wpdb->prefix . 'cm_raffle_icons',
+    $wpdb->prefix . 'cm_raffles',
+    $wpdb->prefix . 'cm_quiz_states',
     $wpdb->prefix . 'cm_qr_codes'
 );
 
@@ -34,12 +39,22 @@ $options = array(
     'cm_allow_file_types',
     'cm_max_file_size',
     'cm_quiz_time_limit',
-    'cm_auto_advance_presentations'
+    'cm_auto_advance_presentations',
+    'cm_quiz_sse_enabled',
+    'cm_quiz_default_mode',
+    'cm_quiz_auto_switch_delay',
+    'cm_quiz_max_sse_connections',
+    'cm_quiz_polling_fallback',
+    'cm_db_migration_version'
 );
 
 foreach ($options as $option) {
     delete_option($option);
 }
+
+// Event records use a custom table, so their CSS options are namespaced by ID.
+$event_css_option_like = $wpdb->esc_like('cm_event_custom_css_') . '%';
+$wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", $event_css_option_like));
 
 // Delete upload directory and files
 $upload_dir = wp_upload_dir();

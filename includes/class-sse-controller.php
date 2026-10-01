@@ -653,6 +653,7 @@ class CM_SSE_Controller {
                 $presentation_data = $active_presentation ? (array) $active_presentation : null;
                 if ($presentation_data) {
                     $presentation_data['total_days'] = $total_days;
+                    $presentation_data['rendered_html'] = CM_Shortcodes::render_presentation_html($active_presentation);
                 }
                 self::send_event('presentation-change', $presentation_data);
                 $last_active_presentation_id = $current_presentation_id;
@@ -678,7 +679,19 @@ class CM_SSE_Controller {
             $broadcast = get_transient("cm_sse_broadcast_event_{$event_id}");
             if ($broadcast) {
                 error_log("CM_SSE: Broadcasting event {$broadcast['event']} for event $event_id");
-                self::send_event($broadcast['event'], $broadcast['data']);
+                $broadcast_data = $broadcast['data'];
+                if ($broadcast['event'] === 'presentation-change') {
+                    // The same transient reaches public and administrator
+                    // streams. Render per request so admin-only nonce/button
+                    // markup never leaks to an anonymous viewer.
+                    $broadcast_presentation = CM_Lineup::get_active_presentation($event_id);
+                    $broadcast_data = $broadcast_presentation ? (array) $broadcast_presentation : null;
+                    if ($broadcast_data) {
+                        $broadcast_data['total_days'] = $total_days;
+                        $broadcast_data['rendered_html'] = CM_Shortcodes::render_presentation_html($broadcast_presentation);
+                    }
+                }
+                self::send_event($broadcast['event'], $broadcast_data);
                 delete_transient("cm_sse_broadcast_event_{$event_id}");
             }
 

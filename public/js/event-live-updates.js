@@ -200,19 +200,37 @@ document.addEventListener("DOMContentLoaded", function () {
 		};
 	});
 
+	containers.forEach((container) => {
+		synchronizeRaffleDrawLayout(container.dataset.eventId);
+		synchronizeRaffleSidebar(container.dataset.eventId);
+	});
+
 	// Helper functions
 	function updateCurrentPresentation(eventId, presentationData) {
-		const container = document.getElementById(
-			`cm-current-presentation-${eventId}`
-		);
-		if (container) {
-			container.innerHTML = renderPresentationHTML(presentationData);
+		// The draw component owns a running animation. Keep its live DOM node in
+		// place until that animation settles instead of replacing it with SSE HTML.
+		if (isRaffleDrawing(eventId)) {
+			window.setTimeout(function () {
+				updateCurrentPresentation(eventId, presentationData);
+			}, 250);
+			return;
 		}
+
+		const containers = document.querySelectorAll(
+			`[id="cm-current-presentation-${eventId}"]`
+		);
+		containers.forEach((container) => {
+			container.innerHTML = presentationData && presentationData.rendered_html
+				? presentationData.rendered_html
+				: renderPresentationHTML(presentationData);
+		});
+		synchronizeRaffleDrawLayout(eventId, presentationData && presentationData.rendered_html, true);
+		synchronizeRaffleSidebar(eventId);
 	}
 
 	function updateEventLineup(eventId, lineupData) {
-		const container = document.getElementById(`cm-event-lineup-${eventId}`);
-		if (container) {
+		const containers = document.querySelectorAll(`[id="cm-event-lineup-${eventId}"]`);
+		containers.forEach((container) => {
 			// Find the lineup list element to preserve multi-day navigation
 			const lineupList = container.querySelector(".cm-lineup-list");
 			if (lineupList) {
@@ -223,6 +241,7 @@ document.addEventListener("DOMContentLoaded", function () {
 				tempDiv.innerHTML = newContent;
 				const newLineupList = tempDiv.querySelector(".cm-lineup-list");
 				if (newLineupList) {
+					lineupList.className = newLineupList.className;
 					lineupList.innerHTML = newLineupList.innerHTML;
 				} else {
 					lineupList.innerHTML = newContent;
@@ -237,7 +256,216 @@ document.addEventListener("DOMContentLoaded", function () {
 					"[CM SSE] Replaced entire container content (no lineup list found)"
 				);
 			}
+			updateUpcomingLineupItem(container, lineupData);
+		});
+		synchronizeRaffleSidebar(eventId);
+	}
+
+	function updateUpcomingLineupItem(container, lineupData) {
+		const panel = container.querySelector(".cm-lineup-upcoming");
+		if (!panel) return;
+
+		const nextItem = getUpcomingLineupItem(lineupData);
+		panel.innerHTML = renderUpcomingLineupHTML(nextItem);
+		panel.hidden = !nextItem;
+		updateAsideVisibility(container);
+	}
+
+	function updateAsideVisibility(container) {
+		if (!container) return;
+		const aside = container.querySelector(".cm-event-lineup-layout__aside");
+		if (!aside) return;
+		aside.hidden = !aside.querySelector(".cm-lineup-raffle-draw:not([hidden]), .cm-lineup-raffle:not([hidden]), .cm-lineup-upcoming:not([hidden])");
+		const grid = aside.closest(".cm-event-lineup-layout__grid");
+		if (grid) grid.classList.toggle("cm-event-lineup-layout__grid--single", aside.hidden);
+	}
+
+	function getLineupAsides(eventId) {
+		return document.querySelectorAll(
+			`[id="cm-event-lineup-${eventId}"] .cm-event-lineup-layout__aside`
+		);
+	}
+
+	function getRaffleDrawFromHTML(html) {
+		if (!html) return null;
+		const template = document.createElement("template");
+		template.innerHTML = html;
+		return template.content.querySelector(".cm-raffle-presentation-component");
+	}
+
+	function isRaffleDrawing(eventId) {
+		return Array.from(getLineupAsides(eventId)).some((aside) =>
+			aside.querySelector('.cm-raffle-presentation-component[data-drawing="1"]')
+		) || Array.from(document.querySelectorAll(`[id="cm-current-presentation-${eventId}"]`)).some((container) =>
+			container.querySelector('.cm-raffle-presentation-component[data-drawing="1"]')
+		);
+	}
+
+	// A raffle draw uses the schedule sidebar as its audience screen. Moving the
+	// existing component keeps delegated handlers, live polling and an in-flight
+	// animation intact; an SSE-only lineup gets the same component from its HTML.
+	function synchronizeRaffleDrawLayout(eventId, renderedHtml, isPresentationUpdate) {
+		const asides = Array.from(getLineupAsides(eventId));
+		if (!asides.length) return false;
+
+		const renderedDraw = getRaffleDrawFromHTML(renderedHtml);
+		const restoreDefaultAside = function () {
+			asides.forEach((aside) => {
+				aside.classList.remove("cm-event-lineup-layout__aside--raffle-draw");
+				const holder = aside.querySelector(".cm-lineup-raffle-draw");
+				if (holder) {
+					holder.replaceChildren();
+					holder.hidden = true;
+				}
+				const grid = aside.closest(".cm-event-lineup-layout__grid");
+				if (grid) grid.classList.remove("cm-event-lineup-layout__grid--raffle-draw");
+				updateAsideVisibility(aside.closest(".cm-live-container"));
+			});
+			return false;
+		};
+
+		// A presentation update is authoritative. Its ordinary or QR HTML must
+		// remove a card left in the sidebar by the preceding raffle draw.
+		if (isPresentationUpdate && !renderedDraw) return restoreDefaultAside();
+
+		let source = Array.from(document.querySelectorAll(`[id="cm-current-presentation-${eventId}"]`))
+			.map((container) => container.querySelector(".cm-raffle-presentation-component"))
+			.find(Boolean);
+		const activeComponent = asides
+			.map((aside) => aside.querySelector(".cm-lineup-raffle-draw .cm-raffle-presentation-component"))
+			.find(Boolean);
+		const hasDraw = Boolean(renderedDraw || source || activeComponent);
+
+		if (!hasDraw) return restoreDefaultAside();
+
+		const nextRaffleId = renderedDraw && renderedDraw.dataset.raffleId;
+		if (!source && activeComponent && (!nextRaffleId || activeComponent.dataset.raffleId === nextRaffleId)) {
+			source = activeComponent;
 		}
+		if (!source) source = renderedDraw;
+
+		asides.forEach((aside, index) => {
+			let holder = aside.querySelector(".cm-lineup-raffle-draw");
+			if (!holder) {
+				holder = document.createElement("div");
+				holder.className = "cm-lineup-raffle-draw";
+				aside.appendChild(holder);
+			}
+			aside.hidden = false;
+			aside.classList.add("cm-event-lineup-layout__aside--raffle-draw");
+			holder.hidden = false;
+			const grid = aside.closest(".cm-event-lineup-layout__grid");
+			if (grid) {
+				grid.classList.remove("cm-event-lineup-layout__grid--single");
+				grid.classList.add("cm-event-lineup-layout__grid--raffle-draw");
+			}
+			// A page normally contains one schedule. Do not clone a live draw if an
+			// editor placed multiple instances of the same schedule on that page.
+			if (source && index === 0) holder.replaceChildren(source);
+		});
+
+		document.querySelectorAll(`[id="cm-current-presentation-${eventId}"]`).forEach((container) => {
+			container.classList.add("cm-current-presentation--redundant");
+		});
+		return true;
+	}
+
+	function getUpcomingLineupItem(lineup) {
+		const items = (Array.isArray(lineup) ? lineup : lineup ? Object.values(lineup) : [])
+			.slice()
+			.sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""));
+		const active = items.find((item) => item.is_active == "1" || item.is_active === true);
+		return items.find((item) => {
+			const isActive = item.is_active == "1" || item.is_active === true;
+			return !isActive && (!active || (item.start_time || "") >= (active.start_time || ""));
+		}) || null;
+	}
+
+	function renderUpcomingLineupHTML(item) {
+		if (!item) return "";
+		const escapeHtml = (value) => String(value || "").replace(/[&<>\"']/g, (character) => ({
+			"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+		}[character]));
+		const presenter = item.presenter ? `<p class="cm-lineup-upcoming__presenter">${escapeHtml(item.presenter)}</p>` : "";
+		const description = item.description ? `<p class="cm-lineup-upcoming__description">${escapeHtml(item.description)}</p>` : "";
+		return `<p class="cm-lineup-upcoming__eyebrow">Już niedługo</p>
+			<p class="cm-lineup-upcoming__time">${escapeHtml((item.start_time || "").slice(0, 5))}</p>
+			<h3>${escapeHtml(item.title)}</h3>${presenter}${description}`;
+	}
+
+	// A schedule and current-presentation shortcode can coexist on one page.
+	// When the current block is a raffle QR, keep a single visible QR in the
+	// schedule sidebar. If SSE changes it, copy its real URL and image first;
+	// this never hides a fresh QR behind a stale raffle panel.
+	function synchronizeRaffleSidebar(eventId) {
+		const currentContainers = document.querySelectorAll(`[id="cm-current-presentation-${eventId}"]`);
+		const sidebarPanels = document.querySelectorAll(
+			`.cm-live-container[data-event-id="${eventId}"] .cm-event-lineup-layout .cm-lineup-raffle`
+		);
+		if (!currentContainers.length || !sidebarPanels.length) return;
+
+		let currentQr = null;
+		currentContainers.forEach((container) => {
+			if (!currentQr) currentQr = container.querySelector(".cm-raffle-qr");
+		});
+		if (!currentQr) {
+			if (!synchronizeRaffleDrawLayout(eventId)) {
+				currentContainers.forEach((container) => container.classList.remove("cm-current-presentation--redundant"));
+			}
+			return;
+		}
+
+		const currentLink = currentQr.querySelector(".cm-raffle-qr__link");
+		if (!currentLink || !currentLink.href) return;
+
+		sidebarPanels.forEach((panel) => {
+			let heading = panel.querySelector("h2");
+			if (!heading) {
+				heading = document.createElement("h2");
+				heading.textContent = "Dołącz do losowania";
+				panel.appendChild(heading);
+			}
+			let label = panel.querySelector(".cm-lineup-raffle__label");
+			if (!label) {
+				label = document.createElement("p");
+				label.className = "cm-lineup-raffle__label";
+				heading.after(label);
+			}
+			const title = currentQr.querySelector(".cm-raffle-qr__title");
+			label.textContent = title ? title.textContent : "";
+			let instruction = panel.querySelector(".cm-lineup-raffle__instruction");
+			if (!instruction) {
+				instruction = document.createElement("p");
+				instruction.className = "cm-lineup-raffle__instruction";
+				instruction.textContent = "Zeskanuj kod i zarejestruj się.";
+				panel.appendChild(instruction);
+			}
+			let sidebarLink = panel.querySelector(".cm-lineup-raffle__link");
+			if (!sidebarLink) {
+				sidebarLink = document.createElement("a");
+				sidebarLink.className = "cm-lineup-raffle__link";
+				sidebarLink.textContent = currentLink.textContent;
+				panel.appendChild(sidebarLink);
+			}
+			sidebarLink.href = currentLink.href;
+			sidebarLink.textContent = currentLink.textContent;
+			const currentImage = currentQr.querySelector(".cm-raffle-qr__image");
+			let sidebarImage = panel.querySelector(".cm-lineup-raffle__image");
+			if (currentImage && currentImage.src) {
+				if (!sidebarImage) {
+					sidebarImage = document.createElement("img");
+					sidebarImage.className = "cm-lineup-raffle__image";
+					instruction.before(sidebarImage);
+				}
+				sidebarImage.src = currentImage.src;
+				sidebarImage.alt = currentImage.alt;
+			} else if (sidebarImage) {
+				sidebarImage.remove();
+			}
+			panel.hidden = false;
+			updateAsideVisibility(panel.closest(".cm-live-container"));
+		});
+		currentContainers.forEach((container) => container.classList.add("cm-current-presentation--redundant"));
 	}
 
 	function updateMultiDayNavigation(eventId, currentDay, totalDays) {
@@ -382,178 +610,44 @@ document.addEventListener("DOMContentLoaded", function () {
 	}
 
 	function renderLineupHTML(lineup) {
-		if (!lineup) {
-			return '<div class="bg-gradient-to-br from-gray-50 to-gray-100 border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center"><div class="text-gray-400 text-6xl mb-4">📋</div><p class="text-gray-500 text-lg font-medium">Brak zaplanowanych prezentacji</p></div>';
-		}
-
-		// Convert object to array if needed
-		const lineupArray = Array.isArray(lineup) ? lineup : Object.values(lineup);
+		const lineupArray = Array.isArray(lineup) ? lineup : lineup ? Object.values(lineup) : [];
 
 		if (lineupArray.length === 0) {
-			return '<div class="bg-gradient-to-br from-gray-50 to-gray-100 border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center"><div class="text-gray-400 text-6xl mb-4">📋</div><p class="text-gray-500 text-lg font-medium">Brak zaplanowanych prezentacji</p></div>';
+			return '<div class="cm-lineup-list cm-lineup-list--empty"><p>Brak zaplanowanych prezentacji</p></div>';
 		}
 
-		// Sort lineup chronologically by start_time
-		lineupArray.sort((a, b) => {
-			if (!a.start_time || !b.start_time) return 0;
-			return a.start_time.localeCompare(b.start_time);
-		});
-
+		const escapeHtml = (value) => String(value || "").replace(/[&<>\"']/g, (character) => ({
+			"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+		}[character]));
 		const currentTime = new Date().toTimeString().slice(0, 8);
 
 		const itemsHtml = lineupArray
+			.slice()
+			.sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""))
 			.map((item) => {
-				// Calculate end_time if not available
-				let endTime = item.end_time;
+				let endTime = item.end_time || "";
 				if (!endTime && item.start_time && item.duration_minutes) {
-					const startTime = new Date(`1970-01-01T${item.start_time}`);
-					const endTimeMs =
-						startTime.getTime() + item.duration_minutes * 60 * 1000;
-					const endTimeDate = new Date(endTimeMs);
-					endTime = endTimeDate.toTimeString().slice(0, 8);
+					const start = new Date(`1970-01-01T${item.start_time}`);
+					endTime = new Date(start.getTime() + item.duration_minutes * 60000).toTimeString().slice(0, 8);
 				}
 
-				const isPast = endTime && endTime < currentTime && !item.is_active;
 				const isCurrent = item.is_active == "1" || item.is_active === true;
+				const isPast = Boolean(endTime && endTime < currentTime && !isCurrent);
+				const startTime = (item.start_time || "").slice(0, 5);
+				const formattedEndTime = endTime ? endTime.slice(0, 5) : "";
+				const timeRange = formattedEndTime ? `${startTime} – ${formattedEndTime}` : startTime;
+				const presenter = item.presenter ? `<p class="cm-presenter">${escapeHtml(item.presenter)}</p>` : "";
+				const description = item.description ? `<p class="cm-description">${escapeHtml(item.description)}</p>` : "";
+				const quickEvent = item.event_type === "quick" ? '<span class="cm-lineup-quick-event">Szybkie wydarzenie</span>' : "";
 
-				// Debug log
-				if (typeof cm_event_data !== "undefined" && cm_event_data.debug) {
-					console.log(
-						`Item ${item.title}: is_active=${item.is_active}, isCurrent=${isCurrent}, isPast=${isPast}`
-					);
-				}
-
-				const startTimeFormatted = item.start_time
-					? new Date(`1970-01-01T${item.start_time}`).toLocaleTimeString([], {
-							hour: "2-digit",
-							minute: "2-digit",
-							hour12: false,
-					  })
-					: "";
-
-				// Calculate end time formatted
-				let endTimeFormatted = "";
-				if (item.start_time && item.duration_minutes) {
-					const startTime = new Date(`1970-01-01T${item.start_time}`);
-					const endTimeMs =
-						startTime.getTime() + item.duration_minutes * 60 * 1000;
-					const endTimeDate = new Date(endTimeMs);
-					endTimeFormatted = endTimeDate.toLocaleTimeString([], {
-						hour: "2-digit",
-						minute: "2-digit",
-						hour12: false,
-					});
-				}
-
-				if (isCurrent) {
-					return `
-						<div class="cm-lineup-item relative bg-gradient-to-r from-blue-500 to-indigo-600 rounded-2xl shadow-xl p-6 mb-6 overflow-hidden transform transition-all hover:scale-[1.02] border-2 border-blue-400">
-							<div class="absolute inset-0 bg-white opacity-5"></div>
-							<span class="absolute top-4 right-4 flex h-3 w-3">
-								<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-								<span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-							</span>
-							<div class="relative flex items-start gap-6">
-								<div class="flex-shrink-0">
-									<div class="bg-white/20 backdrop-blur-sm rounded-xl px-4 py-3 border-2 border-white/30 min-w-[80px] text-center">
-										<div class="text-white text-2xl font-bold leading-none">${startTimeFormatted}</div>
-										${
-											endTimeFormatted
-												? `<div class="text-white/70 text-xs mt-1">do ${endTimeFormatted}</div>`
-												: ""
-										}
-										${
-											item.duration_minutes && !endTimeFormatted
-												? `<div class="text-white/70 text-xs mt-1">${item.duration_minutes} min</div>`
-												: ""
-										}
-									</div>
-								</div>
-								<div class="flex-grow min-w-0">
-									<div class="mb-3">
-										<h5 class="text-white text-xl md:text-2xl font-bold mb-2 leading-tight">${
-											item.title
-										}</h5>
-										${
-											item.presenter
-												? `<div class="flex items-center gap-2 text-white/90">
-													<span class="text-lg">👤</span>
-													<span class="font-semibold">${item.presenter}</span>
-												</div>`
-												: ""
-										}
-									</div>
-									${
-										item.description
-											? `<p class="text-white/80 text-sm md:text-base leading-relaxed mt-3">${item.description}</p>`
-											: ""
-									}
-
-								</div>
-							</div>
-						</div>
-					`;
-				} else if (isPast) {
-					return `
-						<div class="cm-lineup-item past bg-white rounded-xl shadow-sm border-2 border-gray-200 p-5 mb-4 opacity-50 hover:opacity-75 transition-opacity">
-							<div class="flex items-start gap-4">
-								<div class="flex-shrink-0">
-									<div class="bg-gray-100 rounded-lg px-3 py-2 min-w-[70px] text-center">
-										<div class="text-gray-500 text-lg font-semibold">${startTimeFormatted}</div>
-									</div>
-								</div>
-								<div class="flex-grow min-w-0">
-									<h5 class="text-gray-600 text-lg font-semibold mb-1 line-through">${
-										item.title
-									}</h5>
-									${
-										item.presenter
-											? `<p class="text-gray-500 text-sm">👤 ${item.presenter}</p>`
-											: ""
-									}
-									${
-										item.description
-											? `<p class="text-gray-400 text-sm mt-2 line-clamp-2">${item.description}</p>`
-											: ""
-									}
-								</div>
-							</div>
-						</div>
-					`;
-				} else {
-					return `
-						<div class="cm-lineup-item bg-white rounded-xl shadow-md hover:shadow-lg border-2 border-gray-200 hover:border-indigo-300 p-5 mb-4 transition-all">
-							<div class="flex items-stretch w-full gap-5">
-								<div class="flex-shrink-0">
-									<div class="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg px-4 py-3 min-w-[80px] text-center border border-indigo-200">
-										<div class="text-indigo-700 text-xl font-bold">${startTimeFormatted}</div>
-									</div>
-								</div>
-								<div class="flex-grow min-w-0">
-									<h5 class="text-gray-900 text-xl text-left font-bold mb-2 leading-tight">${
-										item.title
-									}</h5>
-									${
-										item.presenter
-											? `<div class="flex items-center gap-2 text-gray-700 mb-2">
-												<span class="text-base">👤</span>
-												<span class="font-medium">${item.presenter}</span>
-											</div>`
-											: ""
-									}
-									${
-										item.description
-											? `<p class="text-gray-600 text-sm leading-relaxed mt-2">${item.description}</p>`
-											: ""
-									}
-								</div>
-							</div>
-						</div>
-					`;
-				}
+				return `<div class="cm-lineup-item${isCurrent ? " current" : isPast ? " past" : ""}">
+					${isCurrent ? '<span class="cm-live-badge">Teraz</span>' : ""}
+					<div class="cm-lineup-time"><div class="cm-lineup-time__range">${escapeHtml(timeRange)}</div></div>
+					<div class="cm-lineup-content"><h4>${escapeHtml(item.title)}</h4>${presenter}${description}${quickEvent}</div>
+				</div>`;
 			})
 			.join("");
 
-		return `<div class="cm-lineup-list space-y-4">${itemsHtml}</div>`;
+		return `<div class="cm-lineup-list">${itemsHtml}</div>`;
 	}
 });

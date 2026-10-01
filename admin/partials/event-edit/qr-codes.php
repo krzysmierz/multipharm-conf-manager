@@ -141,6 +141,9 @@ $quizzes = CM_Quiz::get_by_event($event->get_id());
                                     case 'presentation':
                                         echo '<span class="dashicons dashicons-slides"></span> Prezentacja';
                                         break;
+                                    case 'raffle':
+                                        echo '<span class="dashicons dashicons-awards"></span> Rejestracja';
+                                        break;
                                 }
                                 ?>
                             </div>
@@ -158,6 +161,10 @@ $quizzes = CM_Quiz::get_by_event($event->get_id());
                                     case 'presentation':
                                         $presentation = CM_Database::get_row('lineup', array('id' => $qr->target_id));
                                         echo $presentation ? '<strong>' . esc_html($presentation->title) . '</strong>' : 'Prezentacja usunięta';
+                                        break;
+                                    case 'raffle':
+                                        $raffle = CM_Raffle::get($qr->target_id);
+                                        echo $raffle ? '<strong>' . esc_html($raffle->label) . '</strong>' : 'Losowanie usunięte';
                                         break;
                                 }
                                 ?>

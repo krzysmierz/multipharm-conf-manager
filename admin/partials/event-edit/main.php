@@ -12,7 +12,7 @@ if (!defined('WPINC')) {
     die;
 }
 
-$valid_tabs = array('basic', 'lineup', 'quizzes', 'files', 'qr-codes', 'preview');
+$valid_tabs = array('basic', 'lineup', 'quizzes', 'files', 'qr-codes', 'raffle', 'preview');
 $current_tab = (isset($_GET['tab']) && in_array($_GET['tab'], $valid_tabs)) ? $_GET['tab'] : 'basic';
 ?>
 
@@ -54,6 +54,11 @@ $current_tab = (isset($_GET['tab']) && in_array($_GET['tab'], $valid_tabs)) ? $_
             Kody QR
         </a>
 
+        <a href="#" data-tab="raffle" class="flex items-center gap-2 py-4 px-6 text-gray-500 font-medium hover:text-gray-700 hover:border-gray-300 transition-colors duration-150 ease-in-out border-b-2 border-transparent <?php echo $current_tab === 'raffle' ? 'border-blue-500 text-blue-600' : ''; ?>">
+            <span class="dashicons dashicons-awards text-base"></span>
+            Losowanie
+        </a>
+
         <a href="#" data-tab="preview" class="flex items-center gap-2 py-4 px-6 text-gray-500 font-medium hover:text-gray-700 hover:border-gray-300 transition-colors duration-150 ease-in-out border-b-2 border-transparent <?php echo $current_tab === 'preview' ? 'border-blue-500 text-blue-600' : ''; ?>">
             <span class="dashicons dashicons-visibility text-base"></span>
             Podgląd
@@ -81,6 +86,10 @@ $current_tab = (isset($_GET['tab']) && in_array($_GET['tab'], $valid_tabs)) ? $_
         <div id="qr-codes" class="tab-pane <?php echo $current_tab === 'qr-codes' ? 'active' : ''; ?>" <?php echo $current_tab === 'qr-codes' ? 'style="display: block !important;"' : ''; ?>>
             <?php include 'qr-codes.php'; ?>
         </div>
+
+        <div id="raffle" class="tab-pane <?php echo $current_tab === 'raffle' ? 'active' : ''; ?>" <?php echo $current_tab === 'raffle' ? 'style="display: block !important;"' : ''; ?>>
+            <?php include 'raffle-manager.php'; ?>
+        </div>
         
         <div id="preview" class="tab-pane <?php echo $current_tab === 'preview' ? 'active' : ''; ?>" <?php echo $current_tab === 'preview' ? 'style="display: block !important;"' : ''; ?>>
             <?php include 'preview.php'; ?>
@@ -106,6 +115,7 @@ $current_tab = (isset($_GET['tab']) && in_array($_GET['tab'], $valid_tabs)) ? $_
 #quizzes.active,
 #files.active,
 #qr-codes.active,
+#raffle.active,
 #preview.active {
     display: block !important;
     visibility: visible !important;

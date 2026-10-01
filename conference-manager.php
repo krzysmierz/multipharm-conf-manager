@@ -11,7 +11,7 @@
  * Plugin Name:       Conference Manager
  * Plugin URI:        https://photograficznie.pl/conference-manager
  * Description:       Plugin do zarządzania wydarzeniami konferencyjnymi z systemem lineupów, quizami, kodami QR i intuicyjnym panelem administracyjnym upakowane wszystko w ssa.
- * Version:           0.9.7
+ * Version:           0.9.60
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Author:            Krzysztof Mierzejewski
@@ -29,7 +29,7 @@ if (!defined('WPINC')) {
 /**
  * Currently plugin version.
  */
-define('CONFERENCE_MANAGER_VERSION', '0.9.7');
+define('CONFERENCE_MANAGER_VERSION', '0.9.60');
 define('CONFERENCE_MANAGER_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('CONFERENCE_MANAGER_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
@@ -69,7 +69,7 @@ spl_autoload_register(function ($class) {
 /**
  * Simple QR Code generation function for Conference Manager
  */
-function bizconf_generate_qr($text, $size = 200) {
+function bizconf_generate_qr($text, $size = 200, $allow_external_fallback = true) {
     // Check if required classes are available
     if (!class_exists('chillerlan\\QRCode\\QRCode') || 
         !class_exists('chillerlan\\QRCode\\QROptions') ||
@@ -78,7 +78,7 @@ function bizconf_generate_qr($text, $size = 200) {
                   (class_exists('chillerlan\\QRCode\\QRCode') ? 'YES' : 'NO') . 
                   ', Options: ' . (class_exists('chillerlan\\QRCode\\QROptions') ? 'YES' : 'NO') . 
                   ', GD: ' . (extension_loaded('gd') ? 'YES' : 'NO'));
-        return bizconf_generate_qr_fallback($text, $size); // Try fallback
+        return $allow_external_fallback ? bizconf_generate_qr_fallback($text, $size) : false;
     }
     
     try {
@@ -88,12 +88,12 @@ function bizconf_generate_qr($text, $size = 200) {
         $options = new \chillerlan\QRCode\QROptions();
         
         // Set options directly on object
-        $options->version = 5;
+        $options->version = \chillerlan\QRCode\Common\Version::AUTO;
         $options->outputInterface = \chillerlan\QRCode\Output\QRGdImagePNG::class;
         $options->eccLevel = \chillerlan\QRCode\Common\EccLevel::L;
         $options->scale = $scale;
         $options->addQuietzone = true;
-        $options->quietzoneSize = 2;
+        $options->quietzoneSize = 4;
         $options->returnResource = false;
         $options->outputBase64 = false;
 
@@ -104,7 +104,7 @@ function bizconf_generate_qr($text, $size = 200) {
         
         // Log for debugging
         if (is_string($imageData)) {
-            error_log('CM QR Generator: Generated QR for: ' . substr($text, 0, 50) . '... Size: ' . strlen($imageData) . ' bytes');
+            error_log('CM QR Generator: Generated local QR. Size: ' . strlen($imageData) . ' bytes');
         } else {
             error_log('CM QR Generator: Unexpected return type: ' . gettype($imageData));
             return false;
@@ -113,10 +113,10 @@ function bizconf_generate_qr($text, $size = 200) {
         return $imageData;
     } catch (Exception $e) {
         error_log('Conference Manager QR Generation Error: ' . $e->getMessage());
-        return bizconf_generate_qr_fallback($text, $size);
+        return $allow_external_fallback ? bizconf_generate_qr_fallback($text, $size) : false;
     } catch (Throwable $e) {
         error_log('Conference Manager QR Generation Fatal Error: ' . $e->getMessage());
-        return bizconf_generate_qr_fallback($text, $size);
+        return $allow_external_fallback ? bizconf_generate_qr_fallback($text, $size) : false;
     }
 }
 

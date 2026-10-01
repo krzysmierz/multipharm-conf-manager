@@ -33,6 +33,15 @@ class CM_QR_Generator {
         return self::generate_qr_code($presentation_url, 'presentation', $lineup_id);
     }
 
+    /** Generate a QR code pointing at the token-protected raffle registration form. */
+    public static function generate_raffle_qr($raffle_id) {
+        $raffle = CM_Raffle::get($raffle_id);
+        if (!$raffle) {
+            return new WP_Error('raffle_not_found', __('Nie znaleziono losowania.', 'conference-manager'));
+        }
+        return self::generate_qr_code(CM_Raffle::get_registration_url($raffle), 'raffle', $raffle_id);
+    }
+
     /**
      * Generate QR code image using chillerlan/php-qrcode library
      * 
@@ -57,7 +66,10 @@ class CM_QR_Generator {
         $qr_size = max(100, min(1000, $qr_size)); // Limit size to valid range
         
         // Generate QR code using local PHP library
-        $image_data = bizconf_generate_qr($data, $qr_size);
+        // Raffle URLs contain a secret token and must never be sent to an
+        // external QR service if the local library is unavailable.
+        $allow_external_fallback = ($type !== 'raffle');
+        $image_data = bizconf_generate_qr($data, $qr_size, $allow_external_fallback);
         
         if ($image_data === false) {
             return new WP_Error('qr_generation_failed', 'Nie udało się wygenerować kodu QR - biblioteka QR niedostępna');
@@ -68,12 +80,10 @@ class CM_QR_Generator {
             return new WP_Error('qr_generation_failed', 'Otrzymano puste dane obrazu QR');
         }
         
-        if (strlen($image_data) < 1000) { // PNG should be much larger than 1000 bytes
-            return new WP_Error('qr_generation_failed', 'Otrzymano zbyt małe dane obrazu QR (' . strlen($image_data) . ' bajtów)');
-        }
-        
-        // Check if it starts with PNG header
-        if (substr($image_data, 0, 4) !== "\x89PNG") {
+        // Validate the PNG signature and IHDR dimensions. A tiny, highly
+        // compressible valid PNG must not be rejected by an arbitrary size
+        // threshold.
+        if (!self::is_valid_png($image_data)) {
             return new WP_Error('qr_generation_failed', 'Otrzymano dane w nieprawidłowym formacie (nie PNG)');
         }
         
@@ -84,7 +94,8 @@ class CM_QR_Generator {
         }
         
         // Final validation - check saved file
-        if (!file_exists($file_path) || filesize($file_path) < 1000) {
+        $saved_data = file_exists($file_path) ? file_get_contents($file_path) : false;
+        if ($saved_data === false || !self::is_valid_png($saved_data)) {
             return new WP_Error('qr_file_validation_failed', 'Zapisany plik QR jest nieprawidłowy lub zbyt mały');
         }
         
@@ -116,6 +127,18 @@ class CM_QR_Generator {
         }
     }
 
+    private static function is_valid_png($data) {
+        if (!is_string($data) || strlen($data) < 24 || substr($data, 0, 8) !== "\x89PNG\r\n\x1a\n") {
+            return false;
+        }
+        // PNG starts with an IHDR chunk immediately after the signature.
+        if (substr($data, 12, 4) !== 'IHDR') {
+            return false;
+        }
+        $dimensions = unpack('Nwidth/Nheight', substr($data, 16, 8));
+        return is_array($dimensions) && $dimensions['width'] > 0 && $dimensions['height'] > 0;
+    }
+
     /**
      * Get event ID from target based on type
      */
@@ -129,6 +152,9 @@ class CM_QR_Generator {
             case 'presentation':
                 $lineup = CM_Database::get_row('lineup', array('id' => $target_id));
                 return $lineup ? $lineup->event_id : null;
+            case 'raffle':
+                $raffle = CM_Raffle::get($target_id);
+                return $raffle ? $raffle->event_id : null;
             default:
                 return null;
         }

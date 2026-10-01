@@ -19,6 +19,8 @@ class CM_Lineup {
     private $duration_minutes;
     private $presentation_file;
     private $quiz_id;
+    private $raffle_id;
+    private $raffle_block_type;
     private $event_type;
     private $sort_order;
     private $is_active;
@@ -46,6 +48,8 @@ class CM_Lineup {
             $this->duration_minutes = $item->duration_minutes;
             $this->presentation_file = $item->presentation_file;
             $this->quiz_id = $item->quiz_id ?? null;
+            $this->raffle_id = $item->raffle_id ?? null;
+            $this->raffle_block_type = $item->raffle_block_type ?? null;
             $this->event_type = $item->event_type ?? 'talk';
             $this->sort_order = $item->sort_order;
             $this->is_active = $item->is_active;
@@ -67,6 +71,8 @@ class CM_Lineup {
             'duration_minutes' => $this->duration_minutes,
             'presentation_file' => $this->presentation_file,
             'quiz_id' => $this->quiz_id,
+            'raffle_id' => $this->raffle_id,
+            'raffle_block_type' => $this->raffle_block_type,
             'event_type' => $this->event_type,
             'sort_order' => $this->sort_order,
             'is_active' => $this->is_active ? 1 : 0
@@ -304,6 +310,8 @@ class CM_Lineup {
     public function get_duration_minutes() { return $this->duration_minutes; }
     public function get_presentation_file() { return $this->presentation_file; }
     public function get_quiz_id() { return $this->quiz_id; }
+    public function get_raffle_id() { return $this->raffle_id; }
+    public function get_raffle_block_type() { return $this->raffle_block_type; }
     public function get_event_type() { return $this->event_type; }
     public function get_sort_order() { return $this->sort_order; }
     public function get_is_active() { return $this->is_active; }
@@ -318,6 +326,8 @@ class CM_Lineup {
     public function set_duration_minutes($duration) { $this->duration_minutes = intval($duration); }
     public function set_presentation_file($file) { $this->presentation_file = sanitize_text_field($file); }
     public function set_quiz_id($quiz_id) { $this->quiz_id = $quiz_id ? intval($quiz_id) : null; }
+    public function set_raffle_id($raffle_id) { $this->raffle_id = $raffle_id ? intval($raffle_id) : null; }
+    public function set_raffle_block_type($type) { $this->raffle_block_type = in_array($type, array('raffle_draw', 'raffle_qr'), true) ? $type : null; }
     public function set_event_type($type) {
         if (!in_array($type, array('talk', 'quick'))) {
             throw new InvalidArgumentException('Invalid event type');
@@ -337,7 +347,7 @@ class CM_Lineup {
     /**
      * Create a new quick event instance
      */
-    public static function create_quick_event($event_id, $title, $start_time, $duration_minutes, $day_number = 1) {
+    public static function create_quick_event($event_id, $title, $start_time, $duration_minutes, $day_number = 1, $raffle_id = null, $raffle_block_type = null) {
         error_log("CM_Lineup: Creating quick event - {$title} at {$start_time}, day {$day_number}");
 
         $lineup = new CM_Lineup();
@@ -351,6 +361,8 @@ class CM_Lineup {
         $lineup->set_description(null);
         $lineup->set_presentation_file(null);
         $lineup->set_quiz_id(null);
+        $lineup->set_raffle_id($raffle_id);
+        $lineup->set_raffle_block_type($raffle_block_type);
         $lineup->set_sort_order(self::get_next_sort_order($event_id, $start_time, $day_number));
         return $lineup;
     }

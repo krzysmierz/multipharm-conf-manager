@@ -95,6 +95,28 @@ if (!defined('WPINC')) {
                 </select>
                 <p class="mt-1 text-sm text-gray-500">Bieżący status wydarzenia wpływa na dostępność dla uczestników.</p>
             </div>
+
+            <?php if (current_user_can('edit_css')): ?>
+                <?php $event_css = $event->get_custom_css_settings(); ?>
+                <fieldset class="md:col-span-12 border-t border-gray-200 pt-8">
+                    <legend class="text-lg font-medium text-gray-900">Własny CSS publicznego wydarzenia</legend>
+                    <p class="mt-1 text-sm text-gray-500">
+                        Reguły CSS są przypisane do tego wydarzenia. Aby nie wpływać na inne elementy strony, używaj selektorów
+                        <code>.cm-event-theme-<?php echo esc_html($event->get_id()); ?></code> dla harmonogramu i losowania.
+                    </p>
+                    <div class="mt-5 grid grid-cols-1 gap-6">
+                        <label for="cm-event-schedule-css" class="block text-sm font-medium text-gray-700">
+                            CSS harmonogramu
+                            <textarea id="cm-event-schedule-css" name="event_custom_css[schedule]" rows="10" spellcheck="false" class="cm-event-css-editor mt-2 block w-full font-mono text-sm"><?php echo esc_textarea($event_css['schedule']); ?></textarea>
+                        </label>
+                        <label for="cm-event-raffle-css" class="block text-sm font-medium text-gray-700">
+                            CSS podstrony losowania
+                            <textarea id="cm-event-raffle-css" name="event_custom_css[raffle]" rows="10" spellcheck="false" class="cm-event-css-editor mt-2 block w-full font-mono text-sm"><?php echo esc_textarea($event_css['raffle']); ?></textarea>
+                        </label>
+                    </div>
+                    <p class="mt-3 text-sm text-amber-700">Własny CSS jest narzędziem dla zaufanych administratorów. Nie jest automatycznie przepisywany ani izolowany; nieskopowane selektory mogą wpłynąć na całą stronę.</p>
+                </fieldset>
+            <?php endif; ?>
         </div>
 
         <div class="border-t border-gray-200 pt-8 mt-8">

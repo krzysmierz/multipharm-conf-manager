@@ -15,7 +15,7 @@ if (!defined('WPINC')) {
 
 <div class="wrap">
     <h1 class="wp-heading-inline">KONF-Manager - Multipharm</h1>
-    <div><span>v0.9.2</span>
+    <div><span>v0.9.55</span>
 		<div class="small">dev ops - Krzysztof Mierzejewski photograficznie.pl</div></div>
     <div class="cm-dashboard-container mt-6">
         
@@ -208,54 +208,53 @@ if (!defined('WPINC')) {
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        
-                        <!-- Event Display Shortcode -->
-                        <div class="border border-gray-200 rounded-lg p-4">
-                            <h3 class="text-sm font-medium text-gray-900 mb-2">Wyświetl wydarzenie</h3>
-                            <div class="bg-gray-50 p-3 rounded-md mb-3">
-                                <code class="text-sm text-gray-800">[cm_event id="1"]</code>
-                                <button onclick="copyToClipboard('[cm_event id=&quot;1&quot;]')" class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
-                                    Kopiuj
-                                </button>
-                            </div>
-                            <p class="text-xs text-gray-500">Wyświetla szczegóły wydarzenia o podanym ID</p>
-                        </div>
+                        <?php if (!empty($dashboard_events)): ?>
+                            <?php foreach ($dashboard_events as $dashboard_event): ?>
+                                <?php
+                                $event_id = (int) $dashboard_event->id;
+                                $event_shortcode = '[cm_event id="' . $event_id . '"]';
+                                $presentation_shortcode = '[cm_current_presentation event_id="' . $event_id . '"]';
+                                $lineup_shortcode = '[cm_event_lineup event_id="' . $event_id . '"]';
+                                ?>
+                                <div class="border border-gray-200 rounded-lg p-4">
+                                    <h3 class="text-sm font-medium text-gray-900 mb-1">
+                                        <?php echo esc_html($dashboard_event->title); ?>
+                                    </h3>
+                                    <p class="text-xs text-gray-500 mb-3">ID wydarzenia: <?php echo esc_html($event_id); ?></p>
 
-                        <!-- Current Presentation Shortcode -->
-                        <div class="border border-gray-200 rounded-lg p-4">
-                            <h3 class="text-sm font-medium text-gray-900 mb-2">Aktualna prezentacja</h3>
-                            <div class="bg-gray-50 p-3 rounded-md mb-3">
-                                <code class="text-sm text-gray-800">[cm_current_presentation event_id="1"]</code>
-                                <button onclick="copyToClipboard('[cm_current_presentation event_id=&quot;1&quot;]')" class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
-                                    Kopiuj
-                                </button>
-                            </div>
-                            <p class="text-xs text-gray-500">Pokazuje obecnie trwającą prezentację</p>
-                        </div>
+                                    <p class="text-xs font-medium text-gray-700 mb-1">Wyświetl wydarzenie</p>
+                                    <div class="bg-gray-50 p-3 rounded-md mb-3">
+                                        <code class="text-sm text-gray-800"><?php echo esc_html($event_shortcode); ?></code>
+                                        <button onclick='copyToClipboard(<?php echo esc_attr(wp_json_encode($event_shortcode)); ?>)' class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
+                                            Kopiuj
+                                        </button>
+                                    </div>
 
-                        <!-- Quiz Display Shortcode -->
-                        <div class="border border-gray-200 rounded-lg p-4">
-                            <h3 class="text-sm font-medium text-gray-900 mb-2">Quiz</h3>
-                            <div class="bg-gray-50 p-3 rounded-md mb-3">
-                                <code class="text-sm text-gray-800">[cm_quiz id="1"]</code>
-                                <button onclick="copyToClipboard('[cm_quiz id=&quot;1&quot;]')" class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
-                                    Kopiuj
-                                </button>
-                            </div>
-                            <p class="text-xs text-gray-500">Wyświetla quiz o podanym ID</p>
-                        </div>
+                                    <p class="text-xs font-medium text-gray-700 mb-1">Aktualna prezentacja</p>
+                                    <div class="bg-gray-50 p-3 rounded-md mb-3">
+                                        <code class="text-sm text-gray-800"><?php echo esc_html($presentation_shortcode); ?></code>
+                                        <button onclick='copyToClipboard(<?php echo esc_attr(wp_json_encode($presentation_shortcode)); ?>)' class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
+                                            Kopiuj
+                                        </button>
+                                    </div>
 
-                        <!-- Event Lineup Shortcode -->
-                        <div class="border border-gray-200 rounded-lg p-4">
-                            <h3 class="text-sm font-medium text-gray-900 mb-2">Harmonogram wydarzenia</h3>
-                            <div class="bg-gray-50 p-3 rounded-md mb-3">
-                                <code class="text-sm text-gray-800">[cm_event_lineup event_id="1"]</code>
-                                <button onclick="copyToClipboard('[cm_event_lineup event_id=&quot;1&quot;]')" class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
-                                    Kopiuj
-                                </button>
+                                    <p class="text-xs font-medium text-gray-700 mb-1">Harmonogram wydarzenia</p>
+                                    <div class="bg-gray-50 p-3 rounded-md">
+                                        <code class="text-sm text-gray-800"><?php echo esc_html($lineup_shortcode); ?></code>
+                                        <button onclick='copyToClipboard(<?php echo esc_attr(wp_json_encode($lineup_shortcode)); ?>)' class="ml-2 text-xs text-indigo-600 hover:text-indigo-800">
+                                            Kopiuj
+                                        </button>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center lg:col-span-2">
+                                <p class="text-sm text-gray-600 mb-4">Brak wydarzeń. Utwórz wydarzenie, aby zobaczyć jego shortcody.</p>
+                                <a href="<?php echo esc_url(admin_url('admin.php?page=conference-manager-events')); ?>" class="text-sm text-indigo-600 hover:text-indigo-800">
+                                    Przejdź do wydarzeń
+                                </a>
                             </div>
-                            <p class="text-xs text-gray-500">Pokazuje pełny harmonogram wydarzenia</p>
-                        </div>
+                        <?php endif; ?>
 
                         <!-- Quiz Page with QR Shortcode -->
                         <div class="border border-gray-200 rounded-lg p-4 lg:col-span-2">
@@ -278,7 +277,7 @@ if (!defined('WPINC')) {
                         <h4 class="text-sm font-medium text-blue-900 mb-2">Jak używać:</h4>
                         <ul class="text-xs text-blue-800 space-y-1">
                             <li>• Skopiuj wybrany shortcode i wklej na swojej stronie lub w poście</li>
-                            <li>• Zmień wartość ID na właściwe ID swojego wydarzenia/quizu</li>
+                            <li>• Wybierz shortcode z karty właściwego wydarzenia</li>
                             <li>• Shortcode [cm_quiz_display] należy umieścić na dedykowanej stronie /quiz/</li>
                             <li>• Kody QR automatycznie przekierują na stronę z tym shortcodem</li>
                         </ul>

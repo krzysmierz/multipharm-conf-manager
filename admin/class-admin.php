@@ -65,6 +65,16 @@ class CM_Admin {
         // Enqueue additional scripts based on current page
         $screen = get_current_screen();
         if ($screen && strpos($screen->id, 'conference-manager') !== false) {
+
+            if (current_user_can('edit_css')) {
+                $code_editor_settings = wp_enqueue_code_editor(array('type' => 'text/css'));
+                if (false !== $code_editor_settings) {
+                    wp_add_inline_script(
+                        'code-editor',
+                        'jQuery(function($) { var cmEventCssEditors = []; $(".cm-event-css-editor").each(function() { var editor = wp.codeEditor.initialize(this.id, ' . wp_json_encode($code_editor_settings) . '); editor.codemirror.on("change", function() { editor.codemirror.save(); }); cmEventCssEditors.push(editor); }); $("form.cm-event-basic-form").on("submit", function() { $.each(cmEventCssEditors, function(_, editor) { editor.codemirror.save(); }); }); });'
+                    );
+                }
+            }
             
             wp_enqueue_script('jquery-ui-sortable');
             
@@ -186,6 +196,7 @@ class CM_Admin {
 
         $events_count = CM_Event::get_count_by_status();
         $recent_events = CM_Event::get_all('', '5');
+        $dashboard_events = CM_Event::get_all();
         
         include_once 'partials/dashboard.php';
     }

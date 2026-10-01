@@ -20,6 +20,9 @@ class CM_Ajax {
         $loader->add_action('wp_ajax_cm_delete_lineup_item', $this, 'delete_lineup_item');
         $loader->add_action('wp_ajax_cm_check_time_conflict', $this, 'check_time_conflict');
         $loader->add_action('wp_ajax_cm_clear_time_cache', $this, 'clear_time_cache');
+        $loader->add_action('wp_ajax_cm_draw_raffle_presentation', $this, 'draw_raffle_presentation');
+        $loader->add_action('wp_ajax_cm_get_raffle_live_draw', $this, 'get_raffle_live_draw');
+        $loader->add_action('wp_ajax_nopriv_cm_get_raffle_live_draw', $this, 'get_raffle_live_draw');
 
         // Quick events endpoints
         $loader->add_action('wp_ajax_cm_check_time_conflict_extended', $this, 'check_time_conflict_extended');
@@ -359,7 +362,7 @@ class CM_Ajax {
             // Trigger SSE broadcast
             $active_presentation = CM_Lineup::get_active_presentation($event_id);
             if (class_exists('CM_SSE_Controller')) {
-                CM_SSE_Controller::broadcast_to_event($event_id, 'presentation-change', $active_presentation);
+                CM_SSE_Controller::broadcast_to_event($event_id, 'presentation-change', $active_presentation ? (array) $active_presentation : null);
                 error_log("CM_AJAX: Broadcasted presentation change for event $event_id");
             }
 
@@ -749,7 +752,9 @@ class CM_Ajax {
         $presentation = CM_Lineup::get_active_presentation($event_id);
         
         if ($presentation) {
-            wp_send_json_success($presentation);
+            $payload = (array) $presentation;
+            $payload['rendered_html'] = CM_Shortcodes::render_presentation_html($presentation);
+            wp_send_json_success($payload);
         } else {
             wp_send_json_error('No active presentation');
         }
@@ -2743,6 +2748,17 @@ public function save_quiz() {
         if (empty($title)) {
             wp_send_json_error(__('Tytuł wydarzenia jest wymagany', 'conference-manager'));
         }
+        $raffle_id = absint($_POST['raffle_id'] ?? 0);
+        $raffle_block_type = sanitize_key($_POST['raffle_block'] ?? '');
+        if ($raffle_block_type !== '' && !in_array($raffle_block_type, array('raffle_draw', 'raffle_qr'), true)) {
+            wp_send_json_error(__('Nieprawidłowy typ bloku losowania.', 'conference-manager'));
+        }
+        if ($raffle_block_type) {
+            $raffle = CM_Raffle::get($raffle_id);
+            if (!$raffle || (int) $raffle->event_id !== $event_id) {
+                wp_send_json_error(__('Wybierz losowanie należące do tego wydarzenia.', 'conference-manager'));
+            }
+        } else { $raffle_id = null; }
 
         $start_time = sanitize_text_field($_POST['start_time'] ?? '');
         try {
@@ -2768,7 +2784,7 @@ public function save_quiz() {
         // First, update start times of events that start at or after the insertion time
         CM_Lineup::update_subsequent_event_times($event_id, $normalized_time, $duration, $day_number);
 
-        $lineup = CM_Lineup::create_quick_event($event_id, $title, $normalized_time, $duration, $day_number);
+        $lineup = CM_Lineup::create_quick_event($event_id, $title, $normalized_time, $duration, $day_number, $raffle_id, $raffle_block_type);
         $result = $lineup->save();
 
         if (is_wp_error($result)) {
@@ -3078,5 +3094,83 @@ public function save_quiz() {
         } else {
             wp_send_json_error('Nie udało się usunąć dnia');
         }
+    }
+
+    /**
+     * Select the winner before the browser starts the visual countdown.
+     *
+     * The participant list and the winner are returned together only to an
+     * administrator. This prevents a public schedule visitor from triggering
+     * a persisted draw or enumerating registrations.
+     */
+    public function draw_raffle_presentation() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Brak uprawnień do rozpoczęcia losowania.', 'conference-manager'), 403);
+        }
+
+        $raffle_id = absint($_POST['raffle_id'] ?? 0);
+        $raw_nonce = $_POST['nonce'] ?? '';
+        $nonce = is_scalar($raw_nonce) ? sanitize_text_field(wp_unslash($raw_nonce)) : '';
+        if (!wp_verify_nonce($nonce, 'cm_draw_raffle_presentation_' . $raffle_id)) {
+            wp_send_json_error(__('Kontrola bezpieczeństwa nie powiodła się. Odśwież stronę i spróbuj ponownie.', 'conference-manager'), 403);
+        }
+
+        $raffle = CM_Raffle::get($raffle_id);
+        if (!$raffle) {
+            wp_send_json_error(__('Nie znaleziono losowania.', 'conference-manager'), 404);
+        }
+
+        // add_option is atomic on the option-name key, so two quick requests
+        // cannot create two persisted winners for one press of the button.
+        $lock_key = '_cm_raffle_presentation_lock_' . $raffle_id;
+        $locked_at = (int) get_option($lock_key, 0);
+        if ($locked_at && $locked_at < (time() - 30)) {
+            delete_option($lock_key);
+        }
+        if (!add_option($lock_key, time(), '', 'no')) {
+            wp_send_json_error(__('Losowanie jest już uruchomione. Poczekaj na wynik.', 'conference-manager'), 409);
+        }
+
+        $participants = CM_Raffle::get_participants($raffle_id);
+        $draw = CM_Raffle::draw($raffle_id, get_current_user_id());
+        if (is_wp_error($draw)) {
+            delete_option($lock_key);
+            wp_send_json_error($draw->get_error_message(), 400);
+        }
+
+        $live_draw = CM_Raffle::publish_live_draw($raffle_id, $participants, $draw['participant']);
+        delete_option($lock_key);
+        if (is_wp_error($live_draw)) {
+            wp_send_json_error($live_draw->get_error_message(), 500);
+        }
+
+        // The stream renders this fragment for each viewer, rather than
+        // storing an administrator's nonce-bearing markup in the broadcast.
+        $active_presentation = CM_Lineup::get_active_presentation($raffle->event_id);
+        if ($active_presentation && $active_presentation->raffle_block_type === 'raffle_draw' && (int) $active_presentation->raffle_id === (int) $raffle_id) {
+            CM_SSE_Controller::broadcast_to_event($raffle->event_id, 'presentation-change', (array) $active_presentation);
+        }
+        wp_send_json_success(array('liveDraw' => $live_draw));
+    }
+
+    /** Read-only polling endpoint for standalone and schedule draw screens. */
+    public function get_raffle_live_draw() {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+            wp_send_json_error(__('Nieprawidłowa metoda żądania.', 'conference-manager'), 405);
+        }
+
+        $raw_raffle_id = $_GET['raffle_id'] ?? 0;
+        if (!is_scalar($raw_raffle_id) || !($raffle_id = absint($raw_raffle_id))) {
+            wp_send_json_error(__('Nieprawidłowe losowanie.', 'conference-manager'), 400);
+        }
+        if (!CM_Raffle::get($raffle_id)) {
+            wp_send_json_error(__('Nie znaleziono losowania.', 'conference-manager'), 404);
+        }
+
+        // Public requests must never receive a cached prior draw state.
+        nocache_headers();
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        $state = CM_Raffle::get_live_draw($raffle_id);
+        wp_send_json_success(array('active' => (bool) $state, 'draw' => $state));
     }
 }

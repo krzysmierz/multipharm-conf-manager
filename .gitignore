@@ -25,6 +25,7 @@ error_log
 # PHP and JavaScript dependencies / tooling caches
 /vendor/
 /node_modules/
+/build/*.zip
 /.composer/
 /.npm/
 /.yarn/

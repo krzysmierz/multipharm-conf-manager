@@ -96,6 +96,22 @@ class CM_Public {
      * Handle public requests (QR code redirects, etc.)
      */
     public function handle_public_requests() {
+        // Registration QR URLs are standalone public forms, independent from a
+        // page/shortcode being present in the current theme.
+        if (isset($_GET['cm_raffle']) && is_scalar($_GET['cm_raffle']) && $_GET['cm_raffle'] !== '') {
+            // The response contains a nonce and personal submission status;
+            // never let a page cache serve it to another visitor.
+            nocache_headers();
+            $this->display_raffle_registration(wp_unslash($_GET['cm_raffle']));
+            return;
+        }
+
+        if (isset($_GET['cm_raffle_presentation']) && is_scalar($_GET['cm_raffle_presentation'])) {
+            nocache_headers();
+            $this->display_raffle_presentation(absint($_GET['cm_raffle_presentation']));
+            return;
+        }
+
         // Handle event display
         if (isset($_GET['cm_event']) && !empty($_GET['cm_event'])) {
             $this->display_public_event($_GET['cm_event']);
@@ -164,6 +180,119 @@ class CM_Public {
         global $cm_current_presentation, $cm_current_event;
         $cm_current_presentation = $presentation;
         $cm_current_event = $event;
+    }
+
+    /** Render and process the public registration form for a raffle token. */
+    private function display_raffle_registration($token) {
+        $raffle = CM_Raffle::get_by_token($token);
+        if (!$raffle) {
+            wp_die(esc_html__('Nie znaleziono formularza rejestracji.', 'conference-manager'), esc_html__('Formularz niedostępny', 'conference-manager'), array('response' => 404));
+        }
+
+        $registration_error = '';
+        $action = isset($_POST['cm_raffle_action']) && is_scalar($_POST['cm_raffle_action'])
+            ? (string) wp_unslash($_POST['cm_raffle_action']) : '';
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
+            $raw_nonce = $_POST['_wpnonce'] ?? '';
+            $nonce = is_scalar($raw_nonce) ? sanitize_text_field(wp_unslash($raw_nonce)) : '';
+            if (!wp_verify_nonce($nonce, 'cm_raffle_registration_' . $raffle->token)) {
+                status_header(403);
+                $registration_error = __('Sesja formularza wygasła. Odśwież stronę i spróbuj ponownie.', 'conference-manager');
+            } else {
+                $result = CM_Raffle::register_participant(
+                    $raffle->id,
+                    $_POST['first_name'] ?? '',
+                    $_POST['last_name'] ?? '',
+                    $_POST['icon_id'] ?? 0
+                );
+                if (is_wp_error($result)) {
+                    $registration_error = $result->get_error_message();
+                } else {
+                    wp_safe_redirect(add_query_arg(array(
+                        'cm_raffle' => rawurlencode($raffle->token),
+                        'cm_raffle_status' => 'registered',
+                    ), home_url('/')));
+                    exit;
+                }
+            }
+        }
+
+        $icons = CM_Raffle::get_icons($raffle->id);
+        wp_enqueue_script(
+            'cm-raffle-avatar-slider',
+            plugin_dir_url(__FILE__) . 'js/raffle-avatar-slider.js',
+            array(),
+            defined('CONFERENCE_MANAGER_VERSION') ? CONFERENCE_MANAGER_VERSION : null,
+            true
+        );
+        wp_enqueue_script(
+            'cm-raffle-registration',
+            plugin_dir_url(__FILE__) . 'js/raffle-registration.js',
+            array(),
+            defined('CONFERENCE_MANAGER_VERSION') ? CONFERENCE_MANAGER_VERSION : null,
+            true
+        );
+        $template = CONFERENCE_MANAGER_PLUGIN_PATH . 'public/partials/raffle-registration.php';
+        if (!file_exists($template)) {
+            wp_die(esc_html__('Brakuje szablonu formularza rejestracji.', 'conference-manager'));
+        }
+        include $template;
+        exit;
+    }
+
+    /** Render the audience screen that an administrator uses to run a draw. */
+    private function display_raffle_presentation($raffle_id) {
+        $raffle = CM_Raffle::get($raffle_id);
+        if (!$raffle) {
+            wp_die(esc_html__('Nie znaleziono losowania.', 'conference-manager'), esc_html__('Losowanie niedostępne', 'conference-manager'), array('response' => 404));
+        }
+
+        $event = new CM_Event($raffle->event_id);
+        self::enqueue_raffle_presentation_assets();
+
+        $template = CONFERENCE_MANAGER_PLUGIN_PATH . 'public/partials/raffle-presentation.php';
+        if (!file_exists($template)) {
+            wp_die(esc_html__('Brakuje szablonu ekranu losowania.', 'conference-manager'));
+        }
+        include $template;
+        exit;
+    }
+
+    /** Load the draw component script for standalone and live-updated views. */
+    public static function enqueue_raffle_presentation_assets() {
+        wp_enqueue_script(
+            'cm-raffle-presentation',
+            plugin_dir_url(__FILE__) . 'js/raffle-presentation.js',
+            array(),
+            defined('CONFERENCE_MANAGER_VERSION') ? CONFERENCE_MANAGER_VERSION : null,
+            true
+        );
+    }
+
+    /**
+     * Render the same self-contained draw component in a standalone screen or
+     * an active schedule block. The component's data attributes keep each
+     * dynamically inserted raffle bound to its own nonce and raffle ID.
+     */
+    public static function render_raffle_presentation_card($raffle, $event = null) {
+        if (!$raffle) {
+            return '';
+        }
+
+        $event = $event ?: new CM_Event($raffle->event_id);
+        $participants = CM_Raffle::get_participants($raffle->id);
+        $draws = CM_Raffle::get_draws($raffle->id);
+        $latest_draw = !empty($draws) ? $draws[0] : null;
+        $can_draw = current_user_can('manage_options');
+        $template = CONFERENCE_MANAGER_PLUGIN_PATH . 'public/partials/raffle-presentation-card.php';
+
+        if (!file_exists($template)) {
+            return '<p>' . esc_html__('Brakuje komponentu ekranu losowania.', 'conference-manager') . '</p>';
+        }
+
+        ob_start();
+        include $template;
+        return ob_get_clean();
     }
 
     /**

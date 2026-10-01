@@ -17,6 +17,7 @@ class CM_Activator {
     public static function activate() {
         self::create_tables();
         self::update_lineup_table_schema();
+        self::update_raffle_table_schema();
         self::create_upload_directories();
         self::set_default_options();
     }
@@ -60,12 +61,15 @@ class CM_Activator {
             duration_minutes int DEFAULT 30,
             presentation_file varchar(255),
             quiz_id mediumint(9) DEFAULT NULL,
+            raffle_id mediumint(9) DEFAULT NULL,
+            raffle_block_type varchar(20) DEFAULT NULL,
             sort_order int DEFAULT 0,
             is_active boolean DEFAULT 0,
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id),
             KEY event_id (event_id),
             KEY quiz_id (quiz_id),
+            KEY raffle_id (raffle_id),
             KEY sort_order (sort_order),
             KEY is_active (is_active)
         ) $charset_collate;";
@@ -137,7 +141,7 @@ class CM_Activator {
         $sql_qr = "CREATE TABLE $table_qr (
             id mediumint(9) NOT NULL AUTO_INCREMENT,
             event_id mediumint(9) NOT NULL,
-            code_type enum('event','quiz','presentation') NOT NULL,
+            code_type enum('event','quiz','presentation','raffle') NOT NULL,
             target_id mediumint(9),
             qr_data text NOT NULL,
             file_path varchar(255),
@@ -164,6 +168,58 @@ class CM_Activator {
             CONSTRAINT fk_quiz_states_quiz_id FOREIGN KEY (quiz_id) REFERENCES {$table_quizzes}(id) ON DELETE CASCADE
         ) $charset_collate;";
 
+        // Public registration flows are kept separate from quiz participants.
+        // The unique key below is the concurrency-safe duplicate guard.
+        $table_raffles = $wpdb->prefix . 'cm_raffles';
+        $sql_raffles = "CREATE TABLE $table_raffles (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            event_id mediumint(9) NOT NULL,
+            label varchar(255) NOT NULL,
+            token char(48) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY token (token),
+            KEY event_id (event_id)
+        ) $charset_collate;";
+
+        $table_raffle_participants = $wpdb->prefix . 'cm_raffle_participants';
+        $sql_raffle_participants = "CREATE TABLE $table_raffle_participants (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            raffle_id mediumint(9) NOT NULL,
+            first_name varchar(100) NOT NULL,
+            last_name varchar(100) NOT NULL,
+            normalized_name varchar(220) NOT NULL,
+            identity_hash char(64) NOT NULL,
+            icon_id mediumint(9) unsigned DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY unique_raffle_identity (raffle_id, identity_hash),
+            KEY raffle_id (raffle_id)
+        ) $charset_collate;";
+
+        $table_raffle_icons = $wpdb->prefix . 'cm_raffle_icons';
+        $sql_raffle_icons = "CREATE TABLE $table_raffle_icons (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            raffle_id mediumint(9) NOT NULL,
+            file_name varchar(255) NOT NULL,
+            mime_type varchar(50) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY raffle_id (raffle_id)
+        ) $charset_collate;";
+
+        $table_raffle_draws = $wpdb->prefix . 'cm_raffle_draws';
+        $sql_raffle_draws = "CREATE TABLE $table_raffle_draws (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            raffle_id mediumint(9) NOT NULL,
+            participant_id mediumint(9) NOT NULL,
+            drawn_by bigint(20) unsigned NOT NULL DEFAULT 0,
+            drawn_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY raffle_id (raffle_id),
+            KEY participant_id (participant_id)
+        ) $charset_collate;";
+
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         
         dbDelta($sql_events);
@@ -174,6 +230,10 @@ class CM_Activator {
         dbDelta($sql_responses);
         dbDelta($sql_qr);
         dbDelta($sql_quiz_states);
+        dbDelta($sql_raffles);
+        dbDelta($sql_raffle_participants);
+        dbDelta($sql_raffle_icons);
+        dbDelta($sql_raffle_draws);
         
         // Update existing lineup table to add quiz_id column if it doesn't exist
         self::update_lineup_table_schema();
@@ -251,6 +311,10 @@ class CM_Activator {
                 ADD KEY quiz_id (quiz_id)
             ");
         }
+        $raffle_column = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM {$table_lineup} LIKE %s", 'raffle_id'));
+        if (empty($raffle_column)) { $wpdb->query("ALTER TABLE {$table_lineup} ADD COLUMN raffle_id mediumint(9) DEFAULT NULL AFTER quiz_id, ADD KEY raffle_id (raffle_id)"); }
+        $raffle_type_column = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM {$table_lineup} LIKE %s", 'raffle_block_type'));
+        if (empty($raffle_type_column)) { $wpdb->query("ALTER TABLE {$table_lineup} ADD COLUMN raffle_block_type varchar(20) DEFAULT NULL AFTER raffle_id"); }
         
         // Add participant_name column to user_responses table
         $table_responses = $wpdb->prefix . 'cm_user_responses';
@@ -389,5 +453,154 @@ class CM_Activator {
             require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
             dbDelta($sql_quiz_states);
         }
+    }
+
+    /**
+     * Idempotent migration for public registration raffles. It is separate from
+     * the historical lineup migration so old installations can upgrade safely.
+     */
+    public static function update_raffle_table_schema() {
+        global $wpdb;
+        if (!class_exists('CM_Raffle')) {
+            $raffle_file = dirname(__FILE__) . '/class-raffle.php';
+            if (file_exists($raffle_file)) {
+                require_once $raffle_file;
+            }
+        }
+        $charset_collate = $wpdb->get_charset_collate();
+
+        $table_raffles = $wpdb->prefix . 'cm_raffles';
+        $table_participants = $wpdb->prefix . 'cm_raffle_participants';
+        $table_icons = $wpdb->prefix . 'cm_raffle_icons';
+        $table_draws = $wpdb->prefix . 'cm_raffle_draws';
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta("CREATE TABLE $table_raffles (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            event_id mediumint(9) NOT NULL,
+            label varchar(255) NOT NULL,
+            token char(48) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY token (token),
+            KEY event_id (event_id)
+        ) $charset_collate;");
+        dbDelta("CREATE TABLE $table_participants (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            raffle_id mediumint(9) NOT NULL,
+            first_name varchar(100) NOT NULL,
+            last_name varchar(100) NOT NULL,
+            normalized_name varchar(220) NOT NULL,
+            identity_hash char(64) NOT NULL,
+            icon_id mediumint(9) unsigned DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY unique_raffle_identity (raffle_id, identity_hash),
+            KEY raffle_id (raffle_id)
+        ) $charset_collate;");
+        dbDelta("CREATE TABLE $table_icons (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            raffle_id mediumint(9) NOT NULL,
+            file_name varchar(255) NOT NULL,
+            mime_type varchar(50) NOT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY raffle_id (raffle_id)
+        ) $charset_collate;");
+        dbDelta("CREATE TABLE $table_draws (
+            id mediumint(9) NOT NULL AUTO_INCREMENT,
+            raffle_id mediumint(9) NOT NULL,
+            participant_id mediumint(9) NOT NULL,
+            drawn_by bigint(20) unsigned NOT NULL DEFAULT 0,
+            drawn_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY raffle_id (raffle_id),
+            KEY participant_id (participant_id)
+        ) $charset_collate;");
+
+        // Earlier installations have a narrower ENUM. ALTER is guarded so it
+        // only executes where registration QR rows cannot yet be stored.
+        $table_qr = $wpdb->prefix . 'cm_qr_codes';
+        $column = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table_qr} LIKE %s", 'code_type'));
+        if (!$column) {
+            return false;
+        }
+        if ($column) {
+            $definition = $wpdb->get_row("SHOW COLUMNS FROM {$table_qr} LIKE 'code_type'");
+            if ($definition && strpos($definition->Type, "'raffle'") === false) {
+                if (false === $wpdb->query("ALTER TABLE {$table_qr} MODIFY code_type enum('event','quiz','presentation','raffle') NOT NULL")) {
+                    return false;
+                }
+            }
+        }
+        $definition = $wpdb->get_row("SHOW COLUMNS FROM {$table_qr} LIKE 'code_type'");
+        if (!$definition || strpos($definition->Type, "'raffle'") === false) {
+            return false;
+        }
+
+        // dbDelta can report non-fatal notices while still creating a table;
+        // verify all required tables before allowing the migration version to
+        // advance. A later admin request can safely retry if this fails.
+        foreach (array($table_raffles, $table_participants, $table_icons, $table_draws) as $table) {
+            if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) !== $table) {
+                return false;
+            }
+        }
+        $columns = $wpdb->get_results("SHOW COLUMNS FROM {$table_participants}");
+        $column_names = array();
+        foreach ((array) $columns as $column) {
+            if (isset($column->Field)) {
+                $column_names[] = $column->Field;
+            }
+        }
+        if (!in_array('identity_hash', $column_names, true)) {
+            if (false === $wpdb->query("ALTER TABLE {$table_participants} ADD COLUMN identity_hash char(64) NOT NULL DEFAULT '' AFTER normalized_name")) {
+                return false;
+            }
+        }
+        if (!in_array('icon_id', $column_names, true)) {
+            if (false === $wpdb->query("ALTER TABLE {$table_participants} ADD COLUMN icon_id mediumint(9) unsigned DEFAULT NULL AFTER identity_hash")) {
+                return false;
+            }
+        }
+        // Backfill the identity before creating its unique index. Existing
+        // rows from the first raffle migration otherwise all contain ''.
+        $existing_participants = $wpdb->get_results("SELECT id, first_name, last_name, identity_hash FROM {$table_participants}");
+        foreach ((array) $existing_participants as $participant) {
+            $expected_hash = CM_Raffle::identity_hash($participant->first_name, $participant->last_name);
+            if ((string) $participant->identity_hash !== $expected_hash) {
+                if (false === $wpdb->update($table_participants, array('identity_hash' => $expected_hash), array('id' => (int) $participant->id), array('%s'), array('%d'))) {
+                    return false;
+                }
+            }
+        }
+        $indexes = $wpdb->get_results("SHOW INDEX FROM {$table_participants}");
+        $has_identity_index = false;
+        $has_legacy_index = false;
+        $identity_index_exists = false;
+        $identity_index_columns = array();
+        foreach ((array) $indexes as $index) {
+            if (isset($index->Key_name) && $index->Key_name === 'unique_raffle_identity') {
+                $identity_index_exists = true;
+                if ((int) $index->Non_unique === 0) {
+                    $identity_index_columns[(int) $index->Seq_in_index] = $index->Column_name;
+                }
+            }
+            if (isset($index->Key_name) && $index->Key_name === 'unique_raffle_participant') {
+                $has_legacy_index = true;
+            }
+        }
+        ksort($identity_index_columns);
+        $has_identity_index = ($identity_index_columns === array(1 => 'raffle_id', 2 => 'identity_hash'));
+        if ($has_legacy_index && false === $wpdb->query("ALTER TABLE {$table_participants} DROP INDEX unique_raffle_participant")) {
+            return false;
+        }
+        if ($identity_index_exists && !$has_identity_index && false === $wpdb->query("ALTER TABLE {$table_participants} DROP INDEX unique_raffle_identity")) {
+            return false;
+        }
+        if (!$has_identity_index && false === $wpdb->query("ALTER TABLE {$table_participants} ADD UNIQUE KEY unique_raffle_identity (raffle_id, identity_hash)")) {
+            return false;
+        }
+        return true;
     }
 }
